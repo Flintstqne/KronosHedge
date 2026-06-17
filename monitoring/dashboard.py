@@ -105,7 +105,7 @@ def _fetch_alpaca_live() -> dict | None:
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 st.sidebar.title("Kronos Hedge")
-page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Trade Log", "Regime & Risk"])
+page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk"])
 log_dir = st.sidebar.text_input("Audit log directory", value="./logs/audit")
 st.sidebar.button("Refresh")
 
@@ -140,7 +140,7 @@ logger = AuditLogger(log_dir=log_dir)
 records = logger.load_all()
 
 if not records:
-    if page not in ("Backtest", "News", "Trade Log", "Regime & Risk"):
+    if page not in ("Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk"):
         st.warning("No audit records found. Run `python scripts/seed_demo_data.py` to generate demo data.")
         st.stop()
     latest = {}
@@ -1307,6 +1307,91 @@ elif page == "Backtest":
     else:
         st.info("No backtest results yet. Click 'Run Backtest' above.")
 
+    # ── Walk-Forward Validation ───────────────────────────────────────────────
+    st.divider()
+    st.subheader("Walk-Forward Validation")
+    st.caption(
+        "Splits the full period into non-overlapping out-of-sample windows and backtests each one "
+        "independently — the cleanest test for whether the strategy generalises or is curve-fitted."
+    )
+
+    with st.expander("Run walk-forward", expanded=False):
+        _wf1, _wf2, _wf3 = st.columns(3)
+        _wf_start = _wf1.date_input("WF start", value=pd.Timestamp.today() - pd.Timedelta(days=730), key="wf_start")
+        _wf_end   = _wf2.date_input("WF end",   value=pd.Timestamp.today(), key="wf_end")
+        _wf_win   = _wf3.number_input("Window (months)", min_value=1, max_value=12, value=2, key="wf_win")
+
+        if st.button("Run Walk-Forward"):
+            import traceback as _wftb
+            from qlib_pipeline.walk_forward import walk_forward as _wf_fn
+            import yaml as _wfyaml
+
+            _wf_cfg = _wfyaml.safe_load(open("config/settings.yaml"))
+            _wf_err, _wf_tb = None, ""
+            _wf_df = None
+
+            with st.spinner(f"Running walk-forward ({_wf_win}-month windows)…"):
+                try:
+                    _wf_start_d = _wf_start if isinstance(_wf_start, _date_type) else _wf_start.date()
+                    _wf_end_d   = _wf_end   if isinstance(_wf_end,   _date_type) else _wf_end.date()
+                    _wf_df = _wf_fn(
+                        tickers=_wf_cfg["universe"]["tickers"],
+                        full_start=_wf_start_d,
+                        full_end=_wf_end_d,
+                        window_months=int(_wf_win),
+                        kronos_model_size="mini",  # fast for UI
+                        run_agents=False,
+                        momentum_blend=_wf_cfg["alpha"]["momentum_blend"],
+                        top_n=_wf_cfg["alpha"]["top_n"],
+                    )
+                except Exception as _e:
+                    _wf_err, _wf_tb = _e, _wftb.format_exc()
+
+            if _wf_err:
+                st.error(f"Walk-forward failed: {_wf_err}")
+                with st.expander("Traceback"):
+                    st.code(_wf_tb)
+            elif _wf_df is not None and len(_wf_df) > 1:
+                _wf_data = _wf_df[_wf_df["window"] != "MEAN"].copy()
+                _wf_mean = _wf_df[_wf_df["window"] == "MEAN"]
+
+                _pos_wins = (_wf_data["total_return"] > 0).sum()
+                _tot_wins = len(_wf_data)
+                _consist  = _pos_wins / _tot_wins if _tot_wins else 0
+
+                _wm1, _wm2, _wm3, _wm4 = st.columns(4)
+                _wm1.metric("Windows", _tot_wins)
+                _wm2.metric("Consistency", f"{_consist:.0%}", help="% of windows with positive return")
+                if len(_wf_mean):
+                    _wm3.metric("Mean return / window", f"{float(_wf_mean['total_return'].iloc[0]):+.2%}")
+                    _wm4.metric("Mean Sharpe", f"{float(_wf_mean['sharpe_ratio'].iloc[0]):.2f}")
+
+                # Bar chart — return per window
+                _wf_fig = go.Figure()
+                _wf_colors = [C_BULL if r > 0 else C_BEAR for r in _wf_data["total_return"]]
+                _wf_fig.add_trace(go.Bar(
+                    x=_wf_data["window"].astype(str),
+                    y=(_wf_data["total_return"] * 100).round(2),
+                    marker_color=_wf_colors,
+                    text=[f"{v:+.1f}%" for v in (_wf_data["total_return"] * 100)],
+                    textposition="outside",
+                ))
+                _wf_fig.add_hline(y=0, line_color="white", line_width=0.8, opacity=0.3)
+                _wf_fig.update_layout(
+                    yaxis_title="Return (%)", xaxis_title="Window",
+                    template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                    margin=dict(t=20, b=20), height=320, showlegend=False,
+                )
+                st.plotly_chart(_wf_fig, use_container_width=True)
+
+                st.dataframe(
+                    _wf_df.style.format({
+                        "total_return": "{:+.2%}", "sharpe_ratio": "{:.2f}",
+                        "max_drawdown": "{:.2%}", "win_rate": "{:.1%}",
+                    }),
+                    use_container_width=True, hide_index=True,
+                )
+
 # ═════════════════════════════════════════════════════════════════════════════
 # PAGE: News
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1529,7 +1614,52 @@ elif page == "News":
     st.divider()
 
     # ═══════════════════════════════════════════════════════════════
-    # SECTION 3 — Ticker Headlines & Kronos View
+    # SECTION 3 — Earnings Calendar
+    # ═══════════════════════════════════════════════════════════════
+    st.subheader("Earnings Calendar")
+    st.caption("All scheduled earnings for the universe over the next 60 days.")
+
+    if _earn_ahead_all:
+        _ec_rows = []
+        for _e in sorted(_earn_ahead_all, key=lambda x: x["days_away"]):
+            _days = _e["days_away"]
+            _kron = (latest.get("kronos_signals", {}).get(_e["ticker"], {}).get("directional_signal", "—")
+                     if latest else "—")
+            _when = ("Today" if _days == 0 else
+                     "Tomorrow" if _days == 1 else
+                     f"In {_days}d")
+            _ec_rows.append({
+                "Ticker":        _e["ticker"],
+                "Date":          _e["earnings_date"],
+                "Days Away":     _days,
+                "When":          _when,
+                "Kronos Signal": _kron,
+            })
+        _ec_df = pd.DataFrame(_ec_rows)
+
+        def _color_kron(val: str) -> str:
+            if val == "BUY":   return f"color: {C_BULL}; font-weight:600"
+            if val == "SELL":  return f"color: {C_BEAR}; font-weight:600"
+            return ""
+
+        def _color_days(val: int) -> str:
+            if val <= 1:  return f"color: {C_BEAR}; font-weight:700"
+            if val <= 7:  return f"color: {C_GOLD}; font-weight:600"
+            return ""
+
+        st.dataframe(
+            _ec_df.style
+                .applymap(_color_kron, subset=["Kronos Signal"])
+                .applymap(_color_days, subset=["Days Away"]),
+            use_container_width=True, hide_index=True,
+        )
+    else:
+        st.caption("No earnings scheduled for the universe in the next 60 days.")
+
+    st.divider()
+
+    # ═══════════════════════════════════════════════════════════════
+    # SECTION 4 — Ticker Headlines & Kronos View
     # ═══════════════════════════════════════════════════════════════
     st.subheader("Ticker Headlines & Kronos View")
     st.caption("News fetched on demand for the selected ticker. Kronos forecast from the last run cycle.")
@@ -1680,6 +1810,127 @@ elif page == "News":
             )
     else:
         st.caption(f"No recent headlines found for {_sel_ticker}.")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGE: Portfolio
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif page == "Portfolio":
+    st.title("Portfolio")
+
+    if not _alpaca or "error" in (_alpaca or {}):
+        st.warning("Alpaca not connected. Set ALPACA_API_KEY to see live positions.")
+        st.stop()
+
+    _positions = _alpaca.get("positions", {})
+    _equity    = _alpaca.get("equity", 0.0)
+    _history   = _alpaca.get("history")
+
+    # ── Top metrics ───────────────────────────────────────────────────────────
+    _total_mv  = sum(float(p.market_value) for p in _positions.values())
+    _total_upl = sum(float(p.unrealized_pl) for p in _positions.values())
+    _cash      = _equity - _total_mv
+
+    _pm1, _pm2, _pm3, _pm4 = st.columns(4)
+    _pm1.metric("Account equity",    f"${_equity:,.2f}")
+    _pm2.metric("Invested",          f"${_total_mv:,.2f}")
+    _pm3.metric("Cash",              f"${_cash:,.2f}")
+    _pm4.metric("Unrealised P&L",    f"${_total_upl:+,.2f}",
+                delta=f"{_total_upl / (_equity - _total_upl) * 100:+.2f}%" if (_equity - _total_upl) > 0 else None,
+                delta_color="normal" if _total_upl >= 0 else "inverse")
+
+    st.divider()
+
+    # ── Equity curve (from Alpaca portfolio history) ──────────────────────────
+    if _history is not None:
+        try:
+            _hdf = pd.DataFrame(_history)
+            if "timestamp" in _hdf.columns and "equity" in _hdf.columns:
+                _hdf["timestamp"] = pd.to_datetime(_hdf["timestamp"], unit="s", utc=True)
+                _hdf = _hdf.sort_values("timestamp")
+                _base = float(_hdf["equity"].iloc[0])
+                _hdf["return_pct"] = (_hdf["equity"] / _base - 1) * 100
+
+                _fig_hist = go.Figure()
+                _fig_hist.add_trace(go.Scatter(
+                    x=_hdf["timestamp"], y=_hdf["equity"],
+                    mode="lines", name="Equity",
+                    line=dict(color=C_BULL, width=2),
+                    fill="tozeroy", fillcolor="rgba(38,166,154,0.08)",
+                ))
+                _fig_hist.update_layout(
+                    yaxis_title="Equity ($)", yaxis_tickprefix="$", yaxis_tickformat=",.0f",
+                    template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                    margin=dict(t=10, b=10), height=220, showlegend=False,
+                )
+                st.subheader("Account Equity — Last 30 Days")
+                st.plotly_chart(_fig_hist, use_container_width=True)
+        except Exception:
+            pass
+
+    # ── Positions table ───────────────────────────────────────────────────────
+    st.subheader(f"Open Positions ({len(_positions)})")
+
+    if _positions:
+        _pos_rows = []
+        for _sym, _p in sorted(_positions.items()):
+            _mv   = float(_p.market_value)
+            _upl  = float(_p.unrealized_pl)
+            _qty  = float(_p.qty)
+            _avg  = float(_p.avg_entry_price)
+            _cur  = _mv / _qty if _qty != 0 else 0.0
+            _wt   = _mv / _equity * 100 if _equity else 0.0
+            _uplpct = (_cur / _avg - 1) * 100 if _avg else 0.0
+            _side = "SHORT" if _qty < 0 else "LONG"
+            _pos_rows.append({
+                "Ticker":          _sym,
+                "Side":            _side,
+                "Qty":             round(_qty, 4),
+                "Avg Entry":       round(_avg, 2),
+                "Current Price":   round(_cur, 2),
+                "Market Value":    round(_mv, 2),
+                "Unrealised P&L":  round(_upl, 2),
+                "Return %":        round(_uplpct, 2),
+                "Weight %":        round(_wt, 2),
+            })
+
+        _pos_df = pd.DataFrame(_pos_rows)
+
+        def _color_pl(val: float) -> str:
+            return f"color: {C_BULL}; font-weight:600" if val > 0 else (
+                f"color: {C_BEAR}; font-weight:600" if val < 0 else "")
+
+        def _color_side(val: str) -> str:
+            return f"color: {C_BULL}" if val == "LONG" else f"color: {C_BEAR}"
+
+        st.dataframe(
+            _pos_df.style
+                .applymap(_color_pl, subset=["Unrealised P&L", "Return %"])
+                .applymap(_color_side, subset=["Side"])
+                .format({
+                    "Avg Entry": "${:.2f}", "Current Price": "${:.2f}",
+                    "Market Value": "${:,.2f}", "Unrealised P&L": "${:+,.2f}",
+                    "Return %": "{:+.2f}%", "Weight %": "{:.1f}%",
+                }),
+            use_container_width=True, hide_index=True,
+        )
+
+        # ── Weight breakdown pie ──────────────────────────────────────────────
+        st.subheader("Weight Breakdown")
+        _pie_labels = [r["Ticker"] for r in _pos_rows] + ["Cash"]
+        _pie_values = [abs(r["Market Value"]) for r in _pos_rows] + [max(_cash, 0)]
+        _fig_pie = go.Figure(go.Pie(
+            labels=_pie_labels, values=_pie_values,
+            hole=0.45, textinfo="label+percent",
+            marker=dict(line=dict(color="#0e1117", width=1)),
+        ))
+        _fig_pie.update_layout(
+            template="plotly_dark", paper_bgcolor="#0e1117",
+            margin=dict(t=10, b=10), height=350, showlegend=False,
+        )
+        st.plotly_chart(_fig_pie, use_container_width=True)
+    else:
+        st.info("No open positions. The portfolio is fully in cash.")
 
 # ═════════════════════════════════════════════════════════════════════════════
 # PAGE: Trade Log
