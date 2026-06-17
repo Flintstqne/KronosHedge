@@ -1868,7 +1868,7 @@ elif page == "Regime & Risk":
                 x=_rdf.index, y=_regime_num,
                 mode="lines", fill="tozeroy",
                 line=dict(color=C_BLUE, width=1),
-                fillcolor=f"{C_BLUE}22",
+                fillcolor="rgba(66,165,245,0.13)",
             ))
             _fig_reg.add_hline(y=0, line_color=C_GOLD, line_dash="dot", line_width=1)
             _fig_reg.update_layout(
@@ -1973,7 +1973,11 @@ elif page == "Regime & Risk":
             _fig_vix = go.Figure(go.Scatter(
                 x=_vix_hist.index, y=_vix_hist.values,
                 mode="lines", line=dict(color=_vix_color, width=1.5),
-                fill="tozeroy", fillcolor=f"{_vix_color}22",
+                fill="tozeroy", fillcolor={
+                    C_BEAR: "rgba(239,83,80,0.13)",
+                    C_GOLD: "rgba(255,167,38,0.13)",
+                    C_BULL: "rgba(38,166,154,0.13)",
+                }.get(_vix_color, "rgba(66,165,245,0.13)"),
             ))
             _fig_vix.add_hline(y=25, line_color=C_GOLD, line_dash="dot",
                                line_width=1, annotation_text="shorts gate (25)")
