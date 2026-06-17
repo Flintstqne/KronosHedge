@@ -108,7 +108,7 @@ def _fetch_alpaca_live() -> dict | None:
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 st.sidebar.title("Kronos Hedge")
-page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim", "Stress Test"])
+page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim", "Stress Test", "Settings"])
 log_dir = st.sidebar.text_input("Audit log directory", value="./logs/audit")
 st.sidebar.button("Refresh")
 
@@ -2833,3 +2833,150 @@ elif page == "Stress Test":
             margin=dict(t=40, b=20), height=220, showlegend=False,
         )
         st.plotly_chart(_fig_st, use_container_width=True)
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGE: Settings
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif page == "Settings":
+    import yaml as _sy
+
+    st.title("Strategy Settings")
+    st.caption("Changes write to `config/settings.yaml` and take effect on the next run cycle.")
+    st.info(
+        "On Streamlit Cloud, edits persist until the next redeploy. "
+        "To make them permanent, commit `config/settings.yaml` to the repo after saving.",
+        icon="ℹ️",
+    )
+
+    try:
+        _cfg = _sy.safe_load(open("config/settings.yaml"))
+    except FileNotFoundError:
+        st.error("config/settings.yaml not found. Launch Streamlit from the project root.")
+        st.stop()
+
+    _changed = {}
+
+    # ── Risk ─────────────────────────────────────────────────────────────────
+    st.subheader("Risk Management")
+    _r = _cfg.get("risk", {})
+    _rc1, _rc2, _rc3 = st.columns(3)
+    with _rc1:
+        _changed["risk.cash_reserve_pct"] = st.slider(
+            "Cash reserve when circuit breaker active (%)",
+            0, 80, int(_r.get("cash_reserve_pct", 0.30) * 100), 5,
+            help="Fraction of portfolio redirected to SPY/cash when the drawdown circuit breaker fires.",
+        ) / 100
+        _changed["risk.drawdown_stop"] = st.slider(
+            "Circuit breaker threshold (%)",
+            1, 25, int(_r.get("drawdown_stop", 0.07) * 100), 1,
+            help="Engage circuit breaker when portfolio is this far below its peak.",
+        ) / 100
+    with _rc2:
+        _changed["risk.trailing_stop"] = st.slider(
+            "Trailing stop floor per position (%)",
+            0, 25, int(_r.get("trailing_stop", 0.07) * 100), 1,
+            help="Minimum stop distance per position (actual stop scales with realized vol).",
+        ) / 100
+        _changed["risk.recovery_threshold"] = st.slider(
+            "Circuit breaker recovery threshold (%)",
+            1, 10, int(_r.get("recovery_threshold", 0.02) * 100), 1,
+            help="Release circuit breaker once portfolio is within this % of its peak.",
+        ) / 100
+    with _rc3:
+        _changed["risk.vix_threshold"] = st.number_input(
+            "VIX regime threshold",
+            min_value=10, max_value=60, value=int(_r.get("vix_threshold", 25)), step=1,
+            help="Scale all weights down proportionally when VIX exceeds this level.",
+        )
+        _changed["risk.spy_reserve"] = st.checkbox(
+            "Park reserve in SPY (not idle cash)",
+            value=bool(_r.get("spy_reserve", True)),
+            help="When circuit breaker fires, redirect reserve into SPY instead of cash.",
+        )
+
+    st.divider()
+
+    # ── Execution ─────────────────────────────────────────────────────────────
+    st.subheader("Execution")
+    _e = _cfg.get("execution", {})
+    _ec1, _ec2 = st.columns(2)
+    with _ec1:
+        _changed["execution.max_position_pct"] = st.slider(
+            "Max position size (% of equity)",
+            1, 20, int(_e.get("max_position_pct", 0.05) * 100), 1,
+            help="Hard cap per ticker after conviction scaling.",
+        ) / 100
+        _changed["execution.min_order_usd"] = st.number_input(
+            "Minimum order size ($)",
+            min_value=10, max_value=10_000, value=int(_e.get("min_order_usd", 100)), step=10,
+            help="Orders smaller than this are skipped to avoid excessive churn.",
+        )
+    with _ec2:
+        _changed["execution.paper"] = st.checkbox(
+            "Paper trading mode",
+            value=bool(_e.get("paper", True)),
+            help="Uncheck to switch to live trading. Requires ALPACA_PAPER=false in secrets.",
+        )
+
+    st.divider()
+
+    # ── Alpha / Signal ────────────────────────────────────────────────────────
+    st.subheader("Alpha & Signal Blend")
+    _a = _cfg.get("alpha", {})
+    _ac1, _ac2 = st.columns(2)
+    with _ac1:
+        _changed["alpha.top_n"] = st.slider(
+            "Top-N concentration", 3, 20, int(_a.get("top_n", 10)), 1,
+            help="Hold only the top N ranked stocks. Lower = more concentrated.",
+        )
+        _changed["alpha.momentum_blend"] = st.slider(
+            "Momentum blend (% vs Kronos)", 0, 100, int(_a.get("momentum_blend", 0.80) * 100), 5,
+            help="How much weight to give 12M-1M cross-sectional momentum vs Kronos model score.",
+        ) / 100
+    with _ac2:
+        _rec = _cfg.get("reconciliation", {})
+        _qw = st.slider(
+            "Qlib weight in reconciliation (%)", 0, 100, int(_rec.get("qlib_weight", 0.60) * 100), 5,
+            help="Blend between Qlib alpha weights (momentum/Kronos) and agent portfolio decisions.",
+        ) / 100
+        _changed["reconciliation.qlib_weight"] = _qw
+        _changed["reconciliation.agent_weight"] = round(1.0 - _qw, 2)
+
+    st.divider()
+
+    # ── Sector Limits ─────────────────────────────────────────────────────────
+    st.subheader("Sector Limits")
+    _sf = _cfg.get("sector_filter", {})
+    _sf1, _sf2 = st.columns(2)
+    with _sf1:
+        _changed["sector_filter.max_sector_pct"] = st.slider(
+            "Max sector allocation (%)", 10, 80, int(_sf.get("max_sector_pct", 0.40) * 100), 5,
+            help="No single sector can exceed this fraction of the total portfolio.",
+        ) / 100
+    with _sf2:
+        _changed["sector_filter.max_per_sector"] = st.number_input(
+            "Max positions per sector", 1, 10, int(_sf.get("max_per_sector", 4)), 1,
+            help="Maximum number of individual positions within any one sector.",
+        )
+
+    st.divider()
+
+    # ── Save ─────────────────────────────────────────────────────────────────
+    if st.button("Save settings", type="primary"):
+        for key, val in _changed.items():
+            section, field = key.split(".", 1)
+            if section not in _cfg:
+                _cfg[section] = {}
+            _cfg[section][field] = val
+
+        try:
+            with open("config/settings.yaml", "w") as _f:
+                _sy.dump(_cfg, _f, default_flow_style=False, sort_keys=False)
+            st.success("Settings saved to config/settings.yaml.")
+            st.caption("Commit the file to make changes permanent across deploys.")
+        except Exception as _se:
+            st.error(f"Could not write settings: {_se}")
+
+    with st.expander("Raw YAML (current)"):
+        st.code(_sy.dump(_cfg, default_flow_style=False, sort_keys=False), language="yaml")
