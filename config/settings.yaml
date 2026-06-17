@@ -1,0 +1,121 @@
+universe:
+  source: custom_list
+  max_tickers: 31
+  tickers:
+    # Technology (6)
+    - AAPL
+    - MSFT
+    - NVDA
+    - GOOGL
+    - META
+    - AVGO
+    # Consumer Discretionary (4)
+    - AMZN
+    - TSLA
+    - HD
+    - MCD
+    # Healthcare (4)
+    - UNH
+    - LLY
+    - JNJ
+    - ABBV
+    # Financials (4)
+    - JPM
+    - V
+    - MA
+    - GS
+    # Energy (2)
+    - XOM
+    - CVX
+    # Industrials (3)
+    - CAT
+    - RTX
+    - HON
+    # Consumer Staples (3)
+    - COST
+    - WMT
+    - PG
+    # Communication Services (2)
+    - NFLX
+    - T
+    # Materials (1)
+    - LIN
+    # Utilities (1)
+    - NEE
+    # ETF
+    - SPCX
+
+sector_filter:
+  enabled: true
+  max_sector_pct: 0.40     # no single sector > 40% of the portfolio
+  max_per_sector: 4        # keep at most 4 positions within any one sector
+
+kronos:
+  model_size: small       # mini | small | base | large
+  horizon: 5              # trading days ahead
+  device: cpu             # cuda | cpu  (change to cuda if GPU available)
+  batch_size: 16
+  lookback_days: 60       # historical candles fed to Kronos
+
+agents:
+  llm_provider: anthropic
+  llm_model: claude-sonnet-4-6
+  max_concurrent: 4
+  enabled:
+    - technicals
+    - valuation
+    - sentiment
+    - fundamentals
+    - risk_manager
+    - portfolio_manager
+    - warren_buffett
+    - peter_lynch
+    - charlie_munger
+
+alpha:
+  momentum_blend: 0.80   # fraction of score from 12M-1M cross-sectional momentum vs Kronos
+  top_n: 10              # hold only the top N ranked stocks
+  short_n: 3             # short bottom-N momentum stocks (0 = disabled)
+  pead_boost: 0.20       # score additive for recent EPS beaters
+
+risk:
+  trailing_stop: 0.07        # floor for vol-scaled stop (3σ√5, clipped to this minimum)
+  drawdown_stop: 0.07        # circuit breaker fires when portfolio is this far below peak
+  recovery_threshold: 0.02   # circuit breaker releases when within this % of peak
+  cash_reserve_pct: 0.30     # fraction redirected when circuit breaker is active
+  spy_reserve: true          # park the reserve in SPY instead of idle cash
+  vix_threshold: 25          # scale all weights by (threshold/vix) when VIX exceeds this
+  stop_cooldown_days: 2      # rebalance days to block re-entry after a trailing stop fires
+
+reconciliation:
+  qlib_weight: 0.60
+  agent_weight: 0.40
+
+execution:
+  broker: alpaca
+  paper: true
+  max_position_pct: 0.05
+  min_order_usd: 100
+  twap_intervals: 5
+  intraday_signal_time: "10:00"    # ET — compute signals after opening noise settles
+  intraday_execution_delay: 15     # minutes after signal time to execute
+
+regime:
+  enabled: true
+  yield_curve_threshold: -0.5      # 10Y-3M spread below this % = bearish signal
+  hyg_momentum_threshold: -0.02   # HYG >2% below 20d SMA = credit stress signal
+  spy_trend_threshold: -0.05       # SPY >5% below 200d SMA = bear market signal
+  transition_scale: 0.80           # weight multiplier in transition regime
+  risk_off_scale: 0.50             # weight multiplier in risk_off regime
+
+monitoring:
+  audit_log_path: ./logs/audit
+  dashboard_port: 8501
+  alert_drawdown_threshold: -0.05
+  benchmark_ticker: SPY
+
+qlib:
+  freq: day
+  start_date: "2020-01-01"
+  fit_start_date: "2020-01-01"
+  fit_end_date: "2023-12-31"

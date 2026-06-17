@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kronos-hedge"
+version = "0.1.0"
+description = "Quantitative investment system: Kronos forecasting + Qlib pipeline + LLM agents"
+requires-python = ">=3.11"
+dependencies = [
+    # Kronos
+    "torch>=2.1.0",
+    "huggingface-hub>=0.20.0",
+    "transformers>=4.36.0",
+    # Qlib
+    "pyqlib>=0.9.6",
+    # Agents
+    "langchain>=0.2.0",
+    "langchain-anthropic>=0.1.0",
+    "langchain-openai>=0.1.0",
+    "langgraph>=0.1.0",
+    # Data
+    "pandas>=2.1.0",
+    "numpy>=1.26.0",
+    "yfinance>=0.2.36",
+    # Validation
+    "pydantic>=2.5.0",
+    # Broker
+    "alpaca-py>=0.20.0",
+    # Caching
+    "diskcache>=5.6.0",
+    # Monitoring / dashboard
+    "streamlit>=1.32.0",
+    "plotly>=5.18.0",
+    "structlog>=24.1.0",
+    # Config
+    "pyyaml>=6.0.1",
+    "python-dotenv>=1.0.0",
+    # Utils
+    "httpx>=0.26.0",
+    "rich>=13.7.0",
+    "schedule>=1.2.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "ruff>=0.3.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "kronos_bridge",
+    "agents",
+    "qlib_pipeline",
+    "reconciliation",
+    "execution",
+    "monitoring",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
