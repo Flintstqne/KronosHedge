@@ -12,8 +12,6 @@ dependencies = [
     "torch>=2.1.0",
     "huggingface-hub>=0.20.0",
     "transformers>=4.36.0",
-    # Qlib
-    "pyqlib>=0.9.6",
     # Agents
     "langchain>=0.2.0",
     "langchain-anthropic>=0.1.0",
