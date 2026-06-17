@@ -15,7 +15,7 @@ import yaml
 
 SIM_PATH = Path("logs/forward_sim.json")
 HORIZON  = 21
-N_PATHS  = 8
+N_PATHS  = 16
 
 
 def run(n_paths: int = N_PATHS, horizon: int = HORIZON) -> dict:
@@ -125,7 +125,16 @@ def run(n_paths: int = N_PATHS, horizon: int = HORIZON) -> dict:
     total_w = sum(abs(v) for v in valid_w.values())
     valid_w = {t: v / total_w for t, v in valid_w.items()}
 
-    initial = 100_000.0
+    try:
+        from execution.alpaca import AlpacaAdapter
+        import os
+        paper = os.getenv("ALPACA_PAPER", "true").lower() != "false"
+        initial = AlpacaAdapter(paper=paper).get_equity()
+        print(f"Starting equity from Alpaca: ${initial:,.2f}")
+    except Exception as _e:
+        initial = 100_000.0
+        print(f"Alpaca unavailable ({_e}), using ${initial:,.0f}")
+
     portfolio_paths: list[list[dict]] = []
 
     for path_idx in range(n_paths):
@@ -166,6 +175,7 @@ def run(n_paths: int = N_PATHS, horizon: int = HORIZON) -> dict:
         "simulation_date":  sim_date,
         "horizon_days":     horizon,
         "n_paths":          n_paths,
+        "initial_equity":   round(initial, 2),
         "tickers":          ticker_data,
         "portfolio_paths":  portfolio_paths,
         "portfolio_median": _pct_curve(50),

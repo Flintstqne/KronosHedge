@@ -2308,7 +2308,7 @@ elif page == "Forward Sim":
     _p10 = _sim.get("portfolio_p10", [])
     _p90 = _sim.get("portfolio_p90", [])
     _all_paths = _sim.get("portfolio_paths", [])
-    _base = 100_000.0
+    _base = float(_sim.get("initial_equity", 100_000.0))
 
     if _pm:
         _dates = [r["date"] for r in _pm]
