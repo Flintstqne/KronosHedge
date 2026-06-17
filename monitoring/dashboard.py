@@ -1094,6 +1094,7 @@ elif page == "Backtest":
                     end_date=bt_end,
                     lookback_days=cfg["kronos"]["lookback_days"],
                     kronos_model_size=cfg["kronos"]["model_size"],
+                    kronos_model_source=cfg["kronos"].get("model_source", "chronos"),
                     kronos_horizon=cfg["kronos"]["horizon"],
                     kronos_device=cfg["kronos"]["device"],
                     qlib_weight=cfg["reconciliation"]["qlib_weight"],

@@ -185,12 +185,45 @@ def check_no_orders(orders: list, equity: float) -> AlertRule | None:
     return None
 
 
+def check_orders_placed(orders: list, equity: float) -> AlertRule | None:
+    if not orders:
+        return None
+    buys  = [o for o in orders if o.side == "buy"]
+    sells = [o for o in orders if o.side == "sell"]
+    parts = []
+    if buys:
+        parts.append(f"Bought: {', '.join(o.ticker for o in buys)}")
+    if sells:
+        parts.append(f"Sold: {', '.join(o.ticker for o in sells)}")
+    total_notional = sum(abs(o.notional_usd) for o in orders)
+    return AlertRule(
+        name="OrdersPlaced",
+        message=f"{len(orders)} order(s) executed. {' | '.join(parts)}. "
+                f"Total notional: ${total_notional:,.0f}. Equity: ${equity:,.2f}.",
+        severity="info",
+    )
+
+
+def check_regime_change(current_regime: str, previous_regime: str | None) -> AlertRule | None:
+    if previous_regime is None or current_regime == previous_regime:
+        return None
+    severity = "warning" if current_regime == "risk_off" else "info"
+    return AlertRule(
+        name="RegimeChange",
+        message=f"Market regime shifted: {previous_regime} → {current_regime}. "
+                f"Position sizing rules have updated accordingly.",
+        severity=severity,
+    )
+
+
 def run_all_checks(
     current_equity: float,
     peak_equity: float,
     orders: list,
     kronos_accuracy: float | None,
     cfg: dict,
+    regime: str | None = None,
+    previous_regime: str | None = None,
 ) -> list[AlertRule]:
     fired: list[AlertRule] = []
     threshold = cfg.get("monitoring", {}).get("alert_drawdown_threshold", -0.05)
@@ -210,5 +243,15 @@ def run_all_checks(
     if no_order_alert:
         fire(no_order_alert, {})
         fired.append(no_order_alert)
+
+    orders_alert = check_orders_placed(orders, current_equity)
+    if orders_alert:
+        fire(orders_alert, {"count": len(orders)})
+        fired.append(orders_alert)
+
+    regime_alert = check_regime_change(regime or "unknown", previous_regime)
+    if regime_alert:
+        fire(regime_alert, {"from": previous_regime, "to": regime})
+        fired.append(regime_alert)
 
     return fired

@@ -396,7 +396,11 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
         orders=orders,
         kronos_accuracy=kronos_acc,
         cfg=cfg,
+        regime=regime,
+        previous_regime=risk_state.get("last_regime"),
     )
+    risk_state["last_regime"] = regime
+    _save_risk_state(risk_state)
 
     log.info("cycle_complete", run_id=run_id)
 
