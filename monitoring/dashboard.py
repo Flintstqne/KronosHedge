@@ -238,10 +238,10 @@ def _consensus(ticker: str, record: dict) -> dict:
         sig = record.get(at, {}).get(ticker)
         if isinstance(sig, dict):
             counts[sig.get("signal", "neutral")] = counts.get(sig.get("signal", "neutral"), 0) + 1
-    for investor, per_ticker in (record.get("investor_signals") or {}).items():
-        sig = per_ticker.get(ticker)
+    for name, sig in ((record.get("investor_signals") or {}).get(ticker) or {}).items():
         if isinstance(sig, dict):
-            counts[sig.get("signal", "neutral")] = counts.get(sig.get("signal", "neutral"), 0) + 1
+            vote = sig.get("signal", "neutral")
+            counts[vote] = counts.get(vote, 0) + 1
     total = sum(counts.values())
     return {**counts, "total": total}
 
