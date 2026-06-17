@@ -105,7 +105,7 @@ def _fetch_alpaca_live() -> dict | None:
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 st.sidebar.title("Kronos Hedge")
-page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News"])
+page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Trade Log", "Regime & Risk"])
 log_dir = st.sidebar.text_input("Audit log directory", value="./logs/audit")
 st.sidebar.button("Refresh")
 
@@ -140,7 +140,7 @@ logger = AuditLogger(log_dir=log_dir)
 records = logger.load_all()
 
 if not records:
-    if page not in ("Backtest", "News"):
+    if page not in ("Backtest", "News", "Trade Log", "Regime & Risk"):
         st.warning("No audit records found. Run `python scripts/seed_demo_data.py` to generate demo data.")
         st.stop()
     latest = {}
@@ -1680,3 +1680,311 @@ elif page == "News":
             )
     else:
         st.caption(f"No recent headlines found for {_sel_ticker}.")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGE: Trade Log
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif page == "Trade Log":
+    from datetime import datetime as _dt, timezone as _tz
+
+    st.title("Trade Log")
+
+    # ── Flatten all orders from audit records ────────────────────────────────
+    _rows = []
+    for _rec in records:
+        _ts = _rec.get("timestamp", "")
+        _date = _ts[:10] if _ts else "—"
+        _eq = _rec.get("portfolio_equity", 0.0)
+        _fw = _rec.get("final_weights", {})
+        for _ord in _rec.get("orders", []):
+            _ticker  = _ord.get("ticker", "")
+            _side    = _ord.get("side", "")
+            _notional = float(_ord.get("notional_usd", 0))
+            _status  = _ord.get("status", "")
+            _weight  = _fw.get(_ticker, 0.0)
+            _rows.append({
+                "Date":       _date,
+                "Ticker":     _ticker,
+                "Side":       _side.upper(),
+                "Notional ($)": round(_notional, 2),
+                "Target Weight": f"{_weight:.1%}" if _weight else "—",
+                "Status":     _status,
+                "Equity ($)": round(_eq, 2),
+                "Run ID":     _rec.get("run_id", "")[:16],
+            })
+
+    if not _rows:
+        st.info("No trades recorded yet. Orders will appear here after the first live run cycle.")
+        st.stop()
+
+    _tlog = pd.DataFrame(_rows)
+
+    # ── Filters ──────────────────────────────────────────────────────────────
+    _fc1, _fc2, _fc3 = st.columns(3)
+    _sel_tickers = _fc1.multiselect(
+        "Ticker", sorted(_tlog["Ticker"].unique()), default=[]
+    )
+    _sel_side = _fc2.selectbox("Side", ["All", "BUY", "SELL"])
+    _sel_status = _fc3.selectbox("Status", ["All"] + sorted(_tlog["Status"].unique().tolist()))
+
+    _view = _tlog.copy()
+    if _sel_tickers:
+        _view = _view[_view["Ticker"].isin(_sel_tickers)]
+    if _sel_side != "All":
+        _view = _view[_view["Side"] == _sel_side]
+    if _sel_status != "All":
+        _view = _view[_view["Status"] == _sel_status]
+
+    # ── Summary metrics ───────────────────────────────────────────────────────
+    _m1, _m2, _m3, _m4 = st.columns(4)
+    _m1.metric("Total orders", len(_view))
+    _m2.metric("Buys", int((_view["Side"] == "BUY").sum()))
+    _m3.metric("Sells", int((_view["Side"] == "SELL").sum()))
+    _m4.metric("Total notional", f"${_view['Notional ($)'].sum():,.0f}")
+
+    st.divider()
+
+    # ── Styled table ──────────────────────────────────────────────────────────
+    def _color_side(val: str) -> str:
+        if val == "BUY":
+            return f"color: {C_BULL}; font-weight:600"
+        if val == "SELL":
+            return f"color: {C_BEAR}; font-weight:600"
+        return ""
+
+    _styled = (
+        _view.sort_values("Date", ascending=False)
+        .reset_index(drop=True)
+        .style.applymap(_color_side, subset=["Side"])
+        .format({"Notional ($)": "${:,.2f}", "Equity ($)": "${:,.2f}"})
+    )
+    st.dataframe(_styled, use_container_width=True, height=500)
+
+    # ── Notional by ticker bar chart ──────────────────────────────────────────
+    st.subheader("Notional traded per ticker")
+    _by_ticker = (
+        _view.groupby(["Ticker", "Side"])["Notional ($)"]
+        .sum()
+        .reset_index()
+    )
+    _fig_tl = go.Figure()
+    for _s, _col in [("BUY", C_BULL), ("SELL", C_BEAR)]:
+        _d = _by_ticker[_by_ticker["Side"] == _s]
+        if not _d.empty:
+            _fig_tl.add_trace(go.Bar(
+                x=_d["Ticker"], y=_d["Notional ($)"],
+                name=_s, marker_color=_col,
+            ))
+    _fig_tl.update_layout(
+        barmode="group", template="plotly_dark",
+        paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+        margin=dict(t=20, b=20), height=300,
+        legend=dict(orientation="h"),
+    )
+    st.plotly_chart(_fig_tl, use_container_width=True)
+
+    # ── Activity over time ────────────────────────────────────────────────────
+    st.subheader("Order count by date")
+    _by_date = _view.groupby("Date").size().reset_index(name="Orders")
+    _fig_act = go.Figure(go.Bar(
+        x=_by_date["Date"], y=_by_date["Orders"],
+        marker_color=C_BLUE,
+    ))
+    _fig_act.update_layout(
+        template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+        margin=dict(t=20, b=20), height=250,
+    )
+    st.plotly_chart(_fig_act, use_container_width=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGE: Regime & Risk Monitor
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif page == "Regime & Risk":
+    import json as _json
+
+    st.title("Regime & Risk Monitor")
+
+    _rc1, _rc2 = st.columns([1, 2])
+
+    # ── Macro regime ──────────────────────────────────────────────────────────
+    with _rc1:
+        st.subheader("Macro Regime")
+
+        @st.cache_data(ttl=3600)
+        def _load_regime_inputs():
+            try:
+                from data.macro_regime import fetch_regime_inputs, classify_regime
+                _df = fetch_regime_inputs(lookback_days=252)
+                _df["regime"] = _df.apply(classify_regime, axis=1)
+                return _df
+            except Exception:
+                return pd.DataFrame()
+
+        _rdf = _load_regime_inputs()
+        if not _rdf.empty:
+            _today_regime = _rdf["regime"].iloc[-1]
+            _regime_color = {"risk_on": C_BULL, "transition": C_GOLD, "risk_off": C_BEAR}.get(
+                _today_regime, C_NEUT
+            )
+            st.markdown(
+                f'<div style="background:{_regime_color}22;border:1px solid {_regime_color};'
+                f'border-radius:8px;padding:16px 20px;text-align:center;margin-bottom:12px">'
+                f'<div style="font-size:11px;color:{_regime_color};letter-spacing:1px;text-transform:uppercase">Current Regime</div>'
+                f'<div style="font-size:28px;font-weight:700;color:{_regime_color}">'
+                f'{_today_regime.replace("_", " ").title()}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+
+            _latest = _rdf.iloc[-1]
+            _signals = [
+                ("Yield Curve (10Y−3M)", float(_latest.get("yield_spread", 1.0)),
+                 -0.5, "% spread", True),
+                ("HYG Momentum (vs 20d SMA)", float(_latest.get("hyg_mom", 0.0)) * 100,
+                 -2.0, "%", True),
+                ("SPY vs 200d SMA", float(_latest.get("spy_vs_200", 0.0)) * 100,
+                 -5.0, "%", True),
+            ]
+            for _label, _val, _thresh, _unit, _higher_good in _signals:
+                _bearish = _val < _thresh
+                _sc = C_BEAR if _bearish else C_BULL
+                _icon = "▼" if _bearish else "▲"
+                st.markdown(
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'align-items:center;padding:6px 0;border-bottom:1px solid #1e1e1e">'
+                    f'<span style="font-size:13px;color:#aaa">{_label}</span>'
+                    f'<span style="color:{_sc};font-weight:600">{_icon} {_val:+.2f}{_unit}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # Regime history sparkline
+            st.markdown("<br>", unsafe_allow_html=True)
+            _regime_num = _rdf["regime"].map({"risk_on": 1, "transition": 0, "risk_off": -1})
+            _fig_reg = go.Figure(go.Scatter(
+                x=_rdf.index, y=_regime_num,
+                mode="lines", fill="tozeroy",
+                line=dict(color=C_BLUE, width=1),
+                fillcolor=f"{C_BLUE}22",
+            ))
+            _fig_reg.add_hline(y=0, line_color=C_GOLD, line_dash="dot", line_width=1)
+            _fig_reg.update_layout(
+                template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                margin=dict(t=10, b=10, l=0, r=0), height=120,
+                yaxis=dict(tickvals=[-1, 0, 1],
+                           ticktext=["Risk Off", "Transition", "Risk On"],
+                           showgrid=False),
+                xaxis=dict(showgrid=False),
+                showlegend=False,
+            )
+            st.plotly_chart(_fig_reg, use_container_width=True)
+        else:
+            st.warning("Regime data unavailable — check network access to yfinance.")
+
+    # ── Live risk state ───────────────────────────────────────────────────────
+    with _rc2:
+        st.subheader("Portfolio Risk State")
+
+        _risk_path = Path("data/risk_state.json")
+        if _risk_path.exists():
+            try:
+                _rs = _json.loads(_risk_path.read_text())
+            except Exception:
+                _rs = {}
+        else:
+            _rs = {}
+
+        _live_eq = _alpaca.get("equity") if (_alpaca and "error" not in _alpaca) else None
+        _peak_eq = _rs.get("peak_equity", 0.0)
+        _cb_active = _rs.get("circuit_active", False)
+
+        _rm1, _rm2, _rm3 = st.columns(3)
+        _rm1.metric("Peak equity", f"${_peak_eq:,.2f}" if _peak_eq else "—")
+        if _live_eq and _peak_eq:
+            _dd_now = (_live_eq / _peak_eq - 1) * 100
+            _rm2.metric("Current drawdown", f"{_dd_now:.2f}%",
+                        delta=f"{_dd_now:.2f}%",
+                        delta_color="inverse")
+        else:
+            _rm2.metric("Current drawdown", "—")
+        _cb_label = "ACTIVE" if _cb_active else "Off"
+        _cb_color = C_BEAR if _cb_active else C_BULL
+        st.markdown(
+            f'<div style="padding:8px 0"><span style="color:#aaa;font-size:13px">Circuit Breaker: </span>'
+            f'<span style="color:{_cb_color};font-weight:700">{_cb_label}</span></div>',
+            unsafe_allow_html=True,
+        )
+        _rm3.metric("Open positions", len(_alpaca.get("positions", {})) if _alpaca else "—")
+
+        # Price peaks / stop proximity
+        _peaks = _rs.get("price_peaks", {})
+        if _peaks and _alpaca and "positions" in _alpaca:
+            st.markdown("**Trailing stop proximity** — distance from peak price")
+            _stop_rows = []
+            for _pos in _alpaca.get("positions", {}).values():
+                _t = _pos.get("symbol") or _pos.get("ticker", "")
+                if _t in _peaks:
+                    _px = float(_pos.get("current_price") or _pos.get("avg_entry_price", 0))
+                    _pk = float(_peaks[_t])
+                    _drawdown = (_px / _pk - 1) * 100 if _pk else 0
+                    _stop_rows.append({
+                        "Ticker": _t,
+                        "Current": _px,
+                        "Peak": _pk,
+                        "Drawdown from Peak": f"{_drawdown:.2f}%",
+                    })
+            if _stop_rows:
+                _spdf = pd.DataFrame(_stop_rows).sort_values("Drawdown from Peak")
+                st.dataframe(_spdf, use_container_width=True, hide_index=True)
+            else:
+                st.caption("No peak data for current positions.")
+        elif not _peaks:
+            st.caption("Risk state will populate after the first live run.")
+
+        # ── VIX gauge ─────────────────────────────────────────────────────────
+        st.subheader("VIX")
+
+        @st.cache_data(ttl=1800)
+        def _fetch_vix_hist():
+            try:
+                _raw = yf.download("^VIX", period="6mo", progress=False, auto_adjust=True)
+                _s = _raw["Close"].squeeze().dropna()
+                return _s
+            except Exception:
+                return pd.Series(dtype=float)
+
+        _vix_hist = _fetch_vix_hist()
+        if not _vix_hist.empty:
+            _vix_now = float(_vix_hist.iloc[-1])
+            _vix_color = C_BEAR if _vix_now > 30 else (C_GOLD if _vix_now > 20 else C_BULL)
+            _vc1, _vc2 = st.columns([1, 3])
+            _vc1.markdown(
+                f'<div style="text-align:center;padding-top:10px">'
+                f'<div style="font-size:36px;font-weight:700;color:{_vix_color}">{_vix_now:.1f}</div>'
+                f'<div style="font-size:11px;color:#aaa">Current VIX</div>'
+                f'<div style="font-size:11px;color:#666;margin-top:4px">'
+                f'Shorts gate: {"open" if _vix_now > 25 else "closed"}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+            _fig_vix = go.Figure(go.Scatter(
+                x=_vix_hist.index, y=_vix_hist.values,
+                mode="lines", line=dict(color=_vix_color, width=1.5),
+                fill="tozeroy", fillcolor=f"{_vix_color}22",
+            ))
+            _fig_vix.add_hline(y=25, line_color=C_GOLD, line_dash="dot",
+                               line_width=1, annotation_text="shorts gate (25)")
+            _fig_vix.add_hline(y=30, line_color=C_BEAR, line_dash="dot",
+                               line_width=1, annotation_text="high vol (30)")
+            _fig_vix.update_layout(
+                template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                margin=dict(t=10, b=10, l=0, r=0), height=150,
+                yaxis=dict(showgrid=False), xaxis=dict(showgrid=False),
+                showlegend=False,
+            )
+            _vc2.plotly_chart(_fig_vix, use_container_width=True)
+        else:
+            st.caption("VIX data unavailable.")
