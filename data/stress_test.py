@@ -38,19 +38,17 @@ def run(weights: dict[str, float] | None = None) -> dict:
 
     for name, (start, end) in SCENARIOS.items():
         try:
-            # Download each ticker individually — batch download raises when
-            # any ticker has no history for the period (e.g. SPCX pre-2021)
+            # Use Ticker.history() per symbol — always returns a flat DataFrame
+            # with a plain "Close" column regardless of yfinance version.
             ticker_closes: dict[str, pd.Series] = {}
             for ticker in list(active.keys()):
                 try:
                     with _w.catch_warnings():
                         _w.simplefilter("ignore")
-                        raw = yf.download(ticker, start=start, end=end,
-                                          progress=False, auto_adjust=True)
-                    if raw.empty:
+                        hist = yf.Ticker(ticker).history(start=start, end=end)
+                    if hist.empty or "Close" not in hist.columns:
                         continue
-                    close_col = "Close" if "Close" in raw.columns else raw.columns[0]
-                    s = raw[close_col].dropna()
+                    s = hist["Close"].dropna()
                     if len(s) > 1:
                         ticker_closes[ticker] = s
                 except Exception:
