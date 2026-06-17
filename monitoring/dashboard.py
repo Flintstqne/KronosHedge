@@ -11,6 +11,11 @@ import os
 import sys
 from pathlib import Path
 
+import streamlit as st
+# Bridge Streamlit Cloud secrets into os.environ so dotenv-based code works unchanged
+for _k, _v in st.secrets.items():
+    os.environ.setdefault(_k, str(_v))
+
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
