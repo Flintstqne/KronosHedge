@@ -66,6 +66,10 @@ def run_agent_pipeline(
         "max_position_pct": max_position_pct,
         "news_context": news_context or {},
     }
+    import structlog as _sl
+    _log = _sl.get_logger()
     for agent_fn in _PIPELINE:
+        _log.info("agent_running", agent=agent_fn.__name__)
         state = agent_fn(state)
+        _log.info("agent_done", agent=agent_fn.__name__)
     return state
