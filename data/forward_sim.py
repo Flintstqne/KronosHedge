@@ -14,11 +14,16 @@ import pandas as pd
 import yaml
 
 SIM_PATH = Path("logs/forward_sim.json")
-HORIZON  = 21
-N_PATHS  = 64
 
 
-def run(n_paths: int = N_PATHS, horizon: int = HORIZON) -> dict:
+def _fs_cfg() -> dict:
+    return yaml.safe_load(open("config/settings.yaml")).get("forward_sim", {})
+
+
+def run(n_paths: int | None = None, horizon: int | None = None) -> dict:
+    _cfg    = _fs_cfg()
+    n_paths = n_paths or _cfg.get("n_paths", 64)
+    horizon = horizon or _cfg.get("horizon", 21)
     from qlib_pipeline.data import fetch_ohlcv_universe
     from kronos_bridge.signal import KronosSignalBridge
     from monitoring.logger import AuditLogger

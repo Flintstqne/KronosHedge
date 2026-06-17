@@ -109,6 +109,10 @@ regime:
   transition_scale: 0.80           # weight multiplier in transition regime
   risk_off_scale: 0.50             # weight multiplier in risk_off regime
 
+forward_sim:
+  n_paths: 64
+  horizon: 21
+
 monitoring:
   audit_log_path: ./logs/audit
   dashboard_port: 8501

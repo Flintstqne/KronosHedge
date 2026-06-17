@@ -2304,11 +2304,12 @@ elif page == "Forward Sim":
     # ── Stale-settings warning ────────────────────────────────────────────────
     try:
         import yaml as _fsy
-        from data.forward_sim import N_PATHS as _FS_N_PATHS, HORIZON as _FS_HORIZON
-        _fsk  = _fsy.safe_load(open("config/settings.yaml"))["kronos"]
+        _full_cfg = _fsy.safe_load(open("config/settings.yaml"))
+        _fsk  = _full_cfg["kronos"]
+        _fsim = _full_cfg.get("forward_sim", {})
         _want = {
-            "n_paths":      _FS_N_PATHS,
-            "horizon":      _FS_HORIZON,
+            "n_paths":      _fsim.get("n_paths", 64),
+            "horizon":      _fsim.get("horizon", 21),
             "model_size":   _fsk.get("model_size"),
             "model_source": _fsk.get("model_source", "chronos"),
         }
