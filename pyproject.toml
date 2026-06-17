@@ -21,6 +21,7 @@ dependencies = [
     "pandas>=2.1.0",
     "numpy>=1.26.0",
     "yfinance>=0.2.36",
+    "einops>=0.8.0",
     # Validation
     "pydantic>=2.5.0",
     # Broker
