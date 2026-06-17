@@ -232,7 +232,8 @@ def _consensus(ticker: str, record: dict) -> dict:
     """Count bull/bear/neutral votes across all agents for a ticker."""
     counts = {"bullish": 0, "bearish": 0, "neutral": 0}
     agent_types = ["technical_signals", "fundamental_signals",
-                   "sentiment_signals", "valuation_signals"]
+                   "sentiment_signals", "valuation_signals",
+                   "news_sentiment_signals"]
     for at in agent_types:
         sig = record.get(at, {}).get(ticker)
         if isinstance(sig, dict):
