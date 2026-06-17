@@ -160,11 +160,13 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
 
     # ── 2. Kronos inference ──────────────────────────────────────────────────
     cache = PredictionCache(cache_dir=os.getenv("KRONOS_CACHE_DIR", "./data/kronos_cache"))
+    _ms = kronos_cfg.get("model_source", "chronos")
+    print(f"[kronos] model_size={kronos_cfg['model_size']} model_source={_ms}", flush=True)
     bridge = KronosSignalBridge(
         model_size=kronos_cfg["model_size"],
         horizon=kronos_cfg["horizon"],
         device=kronos_cfg["device"],
-        model_source=kronos_cfg.get("model_source", "chronos"),
+        model_source=_ms,
     )
 
     last_date = (target_date or date.today()).isoformat()
