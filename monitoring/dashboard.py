@@ -13,8 +13,11 @@ from pathlib import Path
 
 import streamlit as st
 # Bridge Streamlit Cloud secrets into os.environ so dotenv-based code works unchanged
-for _k, _v in st.secrets.items():
-    os.environ.setdefault(_k, str(_v))
+try:
+    for _k, _v in st.secrets.items():
+        os.environ.setdefault(_k, str(_v))
+except Exception:
+    pass  # no secrets configured locally — env vars expected via .env or system
 
 import numpy as np
 import pandas as pd
