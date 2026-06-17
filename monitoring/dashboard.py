@@ -586,9 +586,16 @@ elif page == "Performance":
 
     elif _alp and "error" in _alp:
         st.warning(f"Alpaca connection error: {_alp['error']}")
+    elif _alp:
+        # Connected but history not yet available (account too new / no trading days yet)
+        st.info(
+            f"Alpaca connected ({'Paper' if _alp['mode'] == 'Paper' else 'Live'}) — "
+            f"equity **${_alp['equity']:,.2f}**, {len(_alp['positions'])} open positions. "
+            "Portfolio history chart available after the first full trading day."
+        )
     else:
         st.info(
-            "Set `ALPACA_API_KEY` in `.env` to see live portfolio performance here. "
+            "Set `ALPACA_API_KEY` in Streamlit secrets to see live portfolio performance here. "
             "Model quality metrics below are still available from audit logs."
         )
 
