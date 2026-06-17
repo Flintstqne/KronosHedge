@@ -47,10 +47,28 @@ jobs:
           AUDIT_LOG_DIR:        ./logs/audit
         run: uv run python main.py --mode intraday
 
+      - name: Collect options data
+        if: always()
+        run: uv run python data/options_collector.py
+
+      - name: Collect insider transactions
+        if: always()
+        run: uv run python data/insider.py
+
       - name: Upload audit log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: audit-log-${{ github.run_id }}
           path: logs/audit/
+          retention-days: 30
+
+      - name: Upload options + insider data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: market-data-${{ github.run_id }}
+          path: |
+            logs/options_data.json
+            logs/insider_data.json
           retention-days: 30

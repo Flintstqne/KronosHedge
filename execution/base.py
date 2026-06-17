@@ -10,6 +10,8 @@ class Order:
     notional_usd: float
     order_id: str = ""
     status: str = "pending"
+    intended_price: float = 0.0   # close price used for signal
+    fill_price: float = 0.0       # actual execution price from broker
 
 
 @dataclass

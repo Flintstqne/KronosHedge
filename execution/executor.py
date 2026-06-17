@@ -23,7 +23,8 @@ class PortfolioExecutor:
         self.min_order_usd = min_order_usd
         self.dry_run = dry_run
 
-    def execute(self, target_weights: dict[str, float]) -> list[Order]:
+    def execute(self, target_weights: dict[str, float],
+                prices: dict[str, float] | None = None) -> list[Order]:
         equity = self.broker.get_equity()
         current_positions = self.broker.get_positions()
 
@@ -38,7 +39,8 @@ class PortfolioExecutor:
             target_val = equity * target_weights.get(ticker, 0.0)
             delta = target_val - current_val
             if delta < -self.min_order_usd:
-                orders.append(self._place("sell", ticker, abs(delta)))
+                orders.append(self._place("sell", ticker, abs(delta),
+                                          intended_price=(prices or {}).get(ticker, 0.0)))
 
         # Then buys
         for ticker, weight in target_weights.items():
@@ -46,14 +48,18 @@ class PortfolioExecutor:
             current_val = current_values.get(ticker, 0.0)
             delta = target_val - current_val
             if delta > self.min_order_usd:
-                orders.append(self._place("buy", ticker, delta))
+                orders.append(self._place("buy", ticker, delta,
+                                          intended_price=(prices or {}).get(ticker, 0.0)))
 
         return orders
 
-    def _place(self, side: str, ticker: str, notional: float) -> Order:
+    def _place(self, side: str, ticker: str, notional: float,
+               intended_price: float = 0.0) -> Order:
         log.info("order", side=side, ticker=ticker, notional=round(notional, 2),
                  dry_run=self.dry_run)
         if self.dry_run:
             return Order(ticker=ticker, side=side, notional_usd=notional,
-                         order_id="DRY-RUN", status="simulated")
-        return self.broker.submit_order(ticker, side, notional)
+                         order_id="DRY-RUN", status="simulated",
+                         intended_price=intended_price)
+        return self.broker.submit_order(ticker, side, notional,
+                                        intended_price=intended_price)

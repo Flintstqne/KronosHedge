@@ -507,6 +507,7 @@ class Backtester:
                 final_weights=final_weights,
                 orders=order_objs,
                 portfolio_equity=equity,
+                signal_attribution=getattr(alpha, "last_breakdown", {}),
             )
 
     def results_df(self) -> pd.DataFrame:

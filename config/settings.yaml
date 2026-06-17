@@ -45,6 +45,39 @@ universe:
     # ETF
     - SPCX
 
+sector_map:
+  AAPL: Technology
+  MSFT: Technology
+  NVDA: Technology
+  GOOGL: Technology
+  META: Technology
+  AVGO: Technology
+  AMZN: Consumer Discretionary
+  TSLA: Consumer Discretionary
+  HD: Consumer Discretionary
+  MCD: Consumer Discretionary
+  UNH: Healthcare
+  LLY: Healthcare
+  JNJ: Healthcare
+  ABBV: Healthcare
+  JPM: Financials
+  V: Financials
+  MA: Financials
+  GS: Financials
+  XOM: Energy
+  CVX: Energy
+  CAT: Industrials
+  RTX: Industrials
+  HON: Industrials
+  COST: Consumer Staples
+  WMT: Consumer Staples
+  PG: Consumer Staples
+  NFLX: Communication Services
+  T: Communication Services
+  LIN: Materials
+  NEE: Utilities
+  SPCX: ETF
+
 sector_filter:
   enabled: true
   max_sector_pct: 0.40     # no single sector > 40% of the portfolio

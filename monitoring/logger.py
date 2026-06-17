@@ -27,13 +27,37 @@ class AuditLogger:
         orders: list[Order],
         portfolio_equity: float,
         news_context: dict | None = None,
+        signal_attribution: dict | None = None,
     ) -> Path:
+        order_rows = []
+        slippage_bps_list = []
+        for o in orders:
+            slip = None
+            if o.intended_price > 0 and o.fill_price > 0:
+                slip = round((o.fill_price / o.intended_price - 1) * 10_000, 2)
+                slippage_bps_list.append(slip)
+            order_rows.append({
+                "ticker": o.ticker,
+                "side": o.side,
+                "notional_usd": o.notional_usd,
+                "order_id": o.order_id,
+                "status": o.status,
+                "intended_price": o.intended_price,
+                "fill_price": o.fill_price,
+                "slippage_bps": slip,
+            })
+
         record = {
             "run_id": run_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "portfolio_equity": portfolio_equity,
             "kronos_signals": {
                 t: s.model_dump() for t, s in kronos_signals.items()
+            },
+            "signal_attribution": signal_attribution or {},
+            "slippage_summary": {
+                "mean_bps": round(sum(slippage_bps_list) / len(slippage_bps_list), 2) if slippage_bps_list else None,
+                "n_fills": len(slippage_bps_list),
             },
             "technical_signals": agent_state.get("technical_signals", {}),
             "investor_signals": agent_state.get("investor_signals", {}),
@@ -51,16 +75,7 @@ class AuditLogger:
             "portfolio_decisions": agent_state.get("portfolio_decisions", {}),
             "qlib_weights": qlib_weights,
             "final_weights": final_weights,
-            "orders": [
-                {
-                    "ticker": o.ticker,
-                    "side": o.side,
-                    "notional_usd": o.notional_usd,
-                    "order_id": o.order_id,
-                    "status": o.status,
-                }
-                for o in orders
-            ],
+            "orders": order_rows,
         }
 
         date_str = datetime.now(timezone.utc).strftime("%Y-%m-%d_%H-%M-%S")

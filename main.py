@@ -296,7 +296,8 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
         min_order_usd=exec_cfg["min_order_usd"],
         dry_run=dry_run,
     )
-    orders = executor.execute(final_weights)
+    close_prices = {t: float(df["close"].iloc[-1]) for t, df in vol_window.items() if len(df)}
+    orders = executor.execute(final_weights, prices=close_prices)
     equity = broker.get_equity()
     _save_risk_state(risk_state)
     log.info("orders_placed", count=len(orders), equity=equity)
@@ -312,6 +313,7 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
         orders=orders,
         portfolio_equity=equity,
         news_context=news_context,
+        signal_attribution=getattr(alpha_factor, "last_breakdown", {}),
     )
     log.info("audit_written", path=str(log_path))
 

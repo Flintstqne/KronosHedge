@@ -40,7 +40,8 @@ class AlpacaAdapter(BrokerAdapter):
             )
         return out
 
-    def submit_order(self, ticker: str, side: str, notional_usd: float) -> Order:
+    def submit_order(self, ticker: str, side: str, notional_usd: float,
+                     intended_price: float = 0.0) -> Order:
         req = MarketOrderRequest(
             symbol=ticker,
             notional=round(notional_usd, 2),
@@ -48,12 +49,24 @@ class AlpacaAdapter(BrokerAdapter):
             time_in_force=TimeInForce.DAY,
         )
         resp = self._client.submit_order(req)
+
+        fill_price = 0.0
+        try:
+            import time; time.sleep(2)
+            filled = self._client.get_order_by_id(str(resp.id))
+            if getattr(filled, "filled_avg_price", None):
+                fill_price = float(filled.filled_avg_price)
+        except Exception:
+            pass
+
         return Order(
             ticker=ticker,
             side=side,
             notional_usd=notional_usd,
             order_id=str(resp.id),
             status=str(resp.status),
+            intended_price=intended_price,
+            fill_price=fill_price,
         )
 
     def cancel_all_orders(self) -> None:

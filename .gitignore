@@ -25,6 +25,9 @@ logs/audit/*
 logs/*.csv
 logs/*.log
 logs/forward_sim.json
+logs/options_data.json
+logs/insider_data.json
+logs/stress_test.json
 !logs/audit/.gitkeep
 
 # Notebook outputs

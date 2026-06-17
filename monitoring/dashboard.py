@@ -108,7 +108,7 @@ def _fetch_alpaca_live() -> dict | None:
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 st.sidebar.title("Kronos Hedge")
-page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim"])
+page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim", "Stress Test"])
 log_dir = st.sidebar.text_input("Audit log directory", value="./logs/audit")
 st.sidebar.button("Refresh")
 
@@ -143,7 +143,7 @@ logger = AuditLogger(log_dir=log_dir)
 records = logger.load_all()
 
 if not records:
-    if page not in ("Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim"):
+    if page not in ("Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim", "Stress Test"):
         st.warning("No audit records found. Run `python scripts/seed_demo_data.py` to generate demo data.")
         st.stop()
     latest = {}
@@ -1822,6 +1822,56 @@ elif page == "News":
     else:
         st.caption(f"No recent headlines found for {_sel_ticker}.")
 
+    # ── Section 4: Economic Calendar ─────────────────────────────────────────
+    st.divider()
+    st.subheader("Economic Calendar — Next 60 Days")
+    try:
+        from data.economic_calendar import upcoming_events as _econ_events
+        _econ = _econ_events(days_ahead=60)
+        if _econ:
+            _econ_colors = {"FOMC": "#FF9800", "CPI": "#42A5F5", "NFP": "#26A69A"}
+            for _ev in _econ:
+                _col = _econ_colors.get(_ev["type"], "#888")
+                st.markdown(
+                    f'<div style="border-left:3px solid {_col};padding:6px 14px;margin:3px 0;'
+                    f'background:#0a0a0a;border-radius:0 4px 4px 0">'
+                    f'<span style="color:{_col};font-weight:600">{_ev["type"]}</span>'
+                    f'&nbsp;&nbsp;<b>{_ev["date"]}</b>&nbsp;&nbsp;'
+                    f'<span style="color:#aaa;font-size:12px">{_ev["description"]}</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            st.caption("No major events in the next 60 days.")
+    except Exception as _ece:
+        st.caption(f"Economic calendar unavailable: {_ece}")
+
+    # ── Section 5: Insider Transactions ──────────────────────────────────────
+    st.divider()
+    st.subheader("Insider Transactions — Last 60 Days")
+    _ins_path = Path("logs/insider_data.json")
+    if _ins_path.exists():
+        try:
+            _ins = json.loads(_ins_path.read_text())
+            _ins_txns = _ins.get("transactions", [])
+            if _ins_txns:
+                _ins_df = pd.DataFrame(_ins_txns)
+                for _, _row in _ins_df.iterrows():
+                    st.markdown(
+                        f'<div style="padding:5px 14px;margin:2px 0;background:#0a0a0a;border-radius:4px">'
+                        f'<b>{_row["ticker"]}</b>&nbsp;&nbsp;'
+                        f'<span style="color:#aaa">Form 4 filed {_row["filed"]}</span>&nbsp;&nbsp;'
+                        f'<a href="{_row["url"]}" target="_blank" style="color:#42A5F5;font-size:12px">EDGAR ↗</a>'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
+            else:
+                st.caption(f"No Form 4 filings found in last 60 days. Last collected: {_ins.get('date', '—')}")
+        except Exception:
+            st.caption("Insider data unavailable.")
+    else:
+        st.caption("Run `python data/insider.py` or wait for the daily cycle to collect insider data.")
+
 # ═════════════════════════════════════════════════════════════════════════════
 # PAGE: Portfolio
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1943,6 +1993,86 @@ elif page == "Portfolio":
             margin=dict(t=10, b=10), height=350, showlegend=False,
         )
         st.plotly_chart(_fig_pie, use_container_width=True)
+
+        # ── Sector P&L ────────────────────────────────────────────────────────
+        st.subheader("Sector P&L")
+        try:
+            import yaml as _pf_yaml
+            _sector_map = _pf_yaml.safe_load(open("config/settings.yaml")).get("sector_map", {})
+            _sec_pl: dict[str, float] = {}
+            _sec_mv: dict[str, float] = {}
+            for _sym, _p in _positions.items():
+                _sec = _sector_map.get(_sym, "Other")
+                _sec_pl[_sec] = _sec_pl.get(_sec, 0.0) + float(_p.unrealized_pl)
+                _sec_mv[_sec] = _sec_mv.get(_sec, 0.0) + float(_p.market_value)
+            if _sec_pl:
+                _sec_df = pd.DataFrame({
+                    "Sector":        list(_sec_pl.keys()),
+                    "Unrealised P&L": [round(v, 2) for v in _sec_pl.values()],
+                    "Market Value":  [round(v, 2) for v in _sec_mv.values()],
+                }).sort_values("Unrealised P&L", ascending=True)
+                _fig_sec = go.Figure(go.Bar(
+                    x=_sec_df["Unrealised P&L"], y=_sec_df["Sector"],
+                    orientation="h",
+                    marker_color=[C_BULL if v >= 0 else C_BEAR for v in _sec_df["Unrealised P&L"]],
+                    text=[f"${v:+,.0f}" for v in _sec_df["Unrealised P&L"]],
+                    textposition="outside",
+                ))
+                _fig_sec.update_layout(
+                    xaxis_tickprefix="$", xaxis_tickformat=",.0f",
+                    template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                    margin=dict(t=10, b=10, l=130), height=max(200, len(_sec_pl) * 40),
+                    showlegend=False,
+                )
+                st.plotly_chart(_fig_sec, use_container_width=True)
+        except Exception:
+            pass
+
+        # ── Options IV / Put-Call Ratio ───────────────────────────────────────
+        _opt_path = Path("logs/options_data.json")
+        if _opt_path.exists():
+            try:
+                _opt = json.loads(_opt_path.read_text())
+                _opt_date = _opt.get("date", "")
+                st.subheader(f"Options Snapshot — {_opt_date}")
+                _opt_rows = []
+                for _sym in sorted(_opt.get("tickers", {})):
+                    _od = _opt["tickers"][_sym]
+                    if "error" in _od:
+                        continue
+                    _opt_rows.append({
+                        "Ticker":      _sym,
+                        "IV 30d":      _od.get("iv_30d"),
+                        "IV Rank":     _od.get("iv_rank"),
+                        "Put/Call":    _od.get("pcr"),
+                        "Call Vol":    _od.get("call_volume"),
+                        "Put Vol":     _od.get("put_volume"),
+                    })
+                if _opt_rows:
+                    _opt_df = pd.DataFrame(_opt_rows)
+
+                    def _color_ivrank(val):
+                        if val is None: return ""
+                        return f"color: {C_BEAR}; font-weight:600" if val > 0.7 else (
+                               f"color: {C_BULL}" if val < 0.3 else "")
+
+                    def _color_pcr(val):
+                        if val is None: return ""
+                        return f"color: {C_BEAR}; font-weight:600" if val > 1.0 else ""
+
+                    st.dataframe(
+                        _opt_df.style
+                            .map(_color_ivrank, subset=["IV Rank"])
+                            .map(_color_pcr, subset=["Put/Call"])
+                            .format({"IV 30d": "{:.1%}", "IV Rank": "{:.0%}",
+                                     "Put/Call": "{:.2f}",
+                                     "Call Vol": "{:,.0f}", "Put Vol": "{:,.0f}"},
+                                    na_rep="—"),
+                        use_container_width=True, hide_index=True,
+                    )
+                    st.caption("IV Rank >70% = elevated vol (red). PCR >1.0 = put-heavy (bearish skew).")
+            except Exception:
+                pass
     else:
         st.info("No open positions. The portfolio is fully in cash.")
 
@@ -1968,15 +2098,21 @@ elif page == "Trade Log":
             _notional = float(_ord.get("notional_usd", 0))
             _status  = _ord.get("status", "")
             _weight  = _fw.get(_ticker, 0.0)
+            _int_px  = _ord.get("intended_price", 0.0) or 0.0
+            _fill_px = _ord.get("fill_price", 0.0) or 0.0
+            _slip    = round((_fill_px / _int_px - 1) * 10_000, 1) if _int_px > 0 and _fill_px > 0 else None
             _rows.append({
-                "Date":       _date,
-                "Ticker":     _ticker,
-                "Side":       _side.upper(),
-                "Notional ($)": round(_notional, 2),
-                "Target Weight": f"{_weight:.1%}" if _weight else "—",
-                "Status":     _status,
-                "Equity ($)": round(_eq, 2),
-                "Run ID":     _rec.get("run_id", "")[:16],
+                "Date":           _date,
+                "Ticker":         _ticker,
+                "Side":           _side.upper(),
+                "Notional ($)":   round(_notional, 2),
+                "Target Weight":  f"{_weight:.1%}" if _weight else "—",
+                "Status":         _status,
+                "Intended ($)":   round(_int_px, 2) if _int_px else None,
+                "Fill ($)":       round(_fill_px, 2) if _fill_px else None,
+                "Slippage (bps)": _slip,
+                "Equity ($)":     round(_eq, 2),
+                "Run ID":         _rec.get("run_id", "")[:16],
             })
 
     if not _rows:
@@ -2002,11 +2138,17 @@ elif page == "Trade Log":
         _view = _view[_view["Status"] == _sel_status]
 
     # ── Summary metrics ───────────────────────────────────────────────────────
-    _m1, _m2, _m3, _m4 = st.columns(4)
+    _slip_vals = _tlog["Slippage (bps)"].dropna()
+    _m1, _m2, _m3, _m4, _m5 = st.columns(5)
     _m1.metric("Total orders", len(_view))
     _m2.metric("Buys", int((_view["Side"] == "BUY").sum()))
     _m3.metric("Sells", int((_view["Side"] == "SELL").sum()))
     _m4.metric("Total notional", f"${_view['Notional ($)'].sum():,.0f}")
+    if len(_slip_vals):
+        _m5.metric("Avg slippage", f"{_slip_vals.mean():+.1f} bps",
+                   help="Positive = filled higher than signal price (costs money on buys)")
+    else:
+        _m5.metric("Avg slippage", "—", help="Appears after live fills")
 
     st.divider()
 
@@ -2061,6 +2203,56 @@ elif page == "Trade Log":
         margin=dict(t=20, b=20), height=250,
     )
     st.plotly_chart(_fig_act, use_container_width=True)
+
+    # ── Signal Attribution ────────────────────────────────────────────────────
+    st.subheader("Signal Attribution")
+    _attr_recs = [r for r in records if r.get("signal_attribution")]
+    if _attr_recs:
+        _latest_attr = _attr_recs[-1]
+        _attr = _latest_attr.get("signal_attribution", {})
+        _attr_date = _latest_attr.get("timestamp", "")[:10]
+        st.caption(f"Most recent run: {_attr_date}")
+        _attr_rows = []
+        for _t, _a in sorted(_attr.items()):
+            _attr_rows.append({
+                "Ticker":           _t,
+                "Kronos Score":     _a.get("kronos_score"),
+                "Kronos Norm":      _a.get("kronos_norm"),
+                "Momentum Rank":    _a.get("momentum_rank"),
+                "Composite Score":  _a.get("composite_score"),
+                "PEAD Boost":       _a.get("pead_boost"),
+                "Final Weight":     _a.get("final_weight"),
+            })
+        _attr_df = pd.DataFrame(_attr_rows)
+
+        def _color_weight(val):
+            if val is None: return ""
+            return f"color: {C_BULL}; font-weight:600" if val > 0 else (
+                   f"color: {C_BEAR}" if val < 0 else "")
+
+        st.dataframe(
+            _attr_df.style
+                .map(_color_weight, subset=["Final Weight"])
+                .format({
+                    "Kronos Score": "{:.4f}", "Kronos Norm": "{:.2%}",
+                    "Momentum Rank": "{:.2%}", "Composite Score": "{:.4f}",
+                    "PEAD Boost": "{:.4f}", "Final Weight": "{:.1%}",
+                }, na_rep="—"),
+            use_container_width=True, hide_index=True,
+        )
+        st.caption("Kronos Norm + Momentum Rank → Composite Score → Final Weight after top-N filter.")
+    else:
+        st.info("Signal attribution appears after the next run cycle.")
+
+    # ── Slippage detail ───────────────────────────────────────────────────────
+    _slip_rows = _view[_view["Slippage (bps)"].notna()]
+    if len(_slip_rows):
+        with st.expander(f"Slippage detail ({len(_slip_rows)} fills with price data)"):
+            st.dataframe(
+                _slip_rows[["Date", "Ticker", "Side", "Intended ($)", "Fill ($)", "Slippage (bps)"]].sort_values("Date", ascending=False).reset_index(drop=True)
+                    .style.format({"Intended ($)": "${:.2f}", "Fill ($)": "${:.2f}", "Slippage (bps)": "{:+.1f}"}),
+                use_container_width=True, hide_index=True,
+            )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -2523,3 +2715,99 @@ elif page == "Forward Sim":
                 _tr_df.style.map(_color_delta, subset=["Δ ($)", "Δ (%)"]),
                 use_container_width=True, hide_index=True,
             )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGE: Stress Test
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif page == "Stress Test":
+    import json as _stj
+    from pathlib import Path as _STP
+
+    st.title("Stress Test")
+    st.caption("Replay current portfolio weights against historical market crises.")
+
+    _st_path = _STP("logs/stress_test.json")
+
+    _st_col, _st_btn_col = st.columns([4, 1])
+    with _st_btn_col:
+        if st.button("Run Stress Test", help="Fetches historical prices for all 4 scenarios (~30s)"):
+            with st.spinner("Fetching historical prices…"):
+                try:
+                    from data.stress_test import run as _st_run
+                    from monitoring.logger import AuditLogger as _stAL
+                    _st_weights = {}
+                    try:
+                        _st_recs = _stAL().load_all()
+                        if _st_recs:
+                            _st_weights = _st_recs[-1].get("final_weights", {})
+                    except Exception:
+                        pass
+                    _st_result = _st_run(weights=_st_weights or None)
+                    st.success("Done.")
+                except Exception as _ste:
+                    st.error(str(_ste))
+
+    if not _st_path.exists():
+        st.info("Click 'Run Stress Test' to simulate the current portfolio against historical crises.")
+        st.stop()
+
+    try:
+        _st_data = json.loads(_st_path.read_text())
+    except Exception:
+        st.error("Could not read stress test results.")
+        st.stop()
+
+    _st_computed = _st_data.get("computed_at", "—")[:16]
+    _st_weights_used = _st_data.get("weights_used", {})
+    st.caption(f"Computed: {_st_computed}  ·  {len(_st_weights_used)} tickers weighted")
+
+    _SCENARIO_COLORS = {
+        "COVID Crash (Feb–Mar 2020)":    C_BEAR,
+        "COVID Recovery (Mar–Aug 2020)": C_BULL,
+        "2022 Rate Hike Bear":           "#FF9800",
+        "2018 Q4 Selloff":               "#AB47BC",
+    }
+
+    # ── Summary cards ─────────────────────────────────────────────────────────
+    _st_scenarios = _st_data.get("scenarios", {})
+    _valid = {k: v for k, v in _st_scenarios.items() if "error" not in v}
+    if _valid:
+        _sc_cols = st.columns(len(_valid))
+        for i, (name, s) in enumerate(_valid.items()):
+            ret = s.get("total_return", 0)
+            dd  = s.get("max_drawdown", 0)
+            _sc_cols[i].metric(
+                label=name,
+                value=f"{ret:+.1%}",
+                delta=f"{dd:.1%} max DD",
+                delta_color="inverse",
+            )
+
+    st.divider()
+
+    # ── Equity curves per scenario ────────────────────────────────────────────
+    for name, s in _valid.items():
+        ec = s.get("equity_curve", [])
+        if not ec:
+            continue
+        _ec_df = pd.DataFrame(ec)
+        _color  = _SCENARIO_COLORS.get(name, C_BLUE)
+        _fig_st = go.Figure()
+        _fig_st.add_trace(go.Scatter(
+            x=_ec_df["date"], y=_ec_df["value"],
+            mode="lines", name=name,
+            line=dict(color=_color, width=2),
+            fill="tozeroy",
+            fillcolor=f"rgba({int(_color[1:3],16)},{int(_color[3:5],16)},{int(_color[5:7],16)},0.08)",
+        ))
+        _fig_st.add_hline(y=100, line_dash="dash", line_color="#555", line_width=1)
+        _fig_st.update_layout(
+            title=dict(text=f"{name}  —  {s['total_return']:+.1%} total, {s['max_drawdown']:.1%} max DD",
+                       font=dict(size=13)),
+            yaxis_title="Portfolio Value (base 100)",
+            template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+            margin=dict(t=40, b=20), height=220, showlegend=False,
+        )
+        st.plotly_chart(_fig_st, use_container_width=True)
