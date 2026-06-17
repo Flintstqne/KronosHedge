@@ -13,16 +13,29 @@ def walk_forward(
     full_start: date,
     full_end: date,
     window_months: int = 2,
+    progress_cb=None,   # callable(current: int, total: int, label: str)
     **backtest_kwargs,
 ) -> pd.DataFrame:
     from qlib_pipeline.backtest import Backtester
 
+    # Pre-count windows so progress bar has a denominator
+    _cur, _total = full_start, 0
+    while _cur < full_end:
+        _end = min(_cur + relativedelta(months=window_months), full_end)
+        if (_end - _cur).days < 20:
+            break
+        _total += 1
+        _cur = _end
+
     windows: list[dict] = []
     current = full_start
+    idx = 0
     while current < full_end:
         window_end = min(current + relativedelta(months=window_months), full_end)
         if (window_end - current).days < 20:
             break
+        if progress_cb:
+            progress_cb(idx, _total, f"Window {idx+1}/{_total}: {current} → {window_end}")
         bt = Backtester(tickers=tickers, start_date=current, end_date=window_end,
                         **backtest_kwargs)
         bt.run()
@@ -37,6 +50,9 @@ def walk_forward(
             "trading_days": int(s["trading_days"]),
         })
         current = window_end
+        idx += 1
+    if progress_cb:
+        progress_cb(_total, _total, "Complete")
 
     if not windows:
         return pd.DataFrame()

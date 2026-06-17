@@ -1333,22 +1333,29 @@ elif page == "Backtest":
             _wf_err, _wf_tb = None, ""
             _wf_df = None
 
-            with st.spinner(f"Running walk-forward ({_wf_win}-month windows)…"):
-                try:
-                    _wf_start_d = _wf_start if isinstance(_wf_start, _date_type) else _wf_start.date()
-                    _wf_end_d   = _wf_end   if isinstance(_wf_end,   _date_type) else _wf_end.date()
-                    _wf_df = _wf_fn(
-                        tickers=_wf_cfg["universe"]["tickers"],
-                        full_start=_wf_start_d,
-                        full_end=_wf_end_d,
-                        window_months=int(_wf_win),
-                        kronos_model_size="mini",  # fast for UI
-                        run_agents=False,
-                        momentum_blend=_wf_cfg["alpha"]["momentum_blend"],
-                        top_n=_wf_cfg["alpha"]["top_n"],
-                    )
-                except Exception as _e:
-                    _wf_err, _wf_tb = _e, _wftb.format_exc()
+            _wf_prog  = st.progress(0, text="Starting…")
+            _wf_status = st.empty()
+
+            def _wf_progress(done, total, label):
+                _wf_prog.progress(done / total if total else 1.0, text=label)
+                _wf_status.caption(label)
+
+            try:
+                _wf_start_d = _wf_start if isinstance(_wf_start, _date_type) else _wf_start.date()
+                _wf_end_d   = _wf_end   if isinstance(_wf_end,   _date_type) else _wf_end.date()
+                _wf_df = _wf_fn(
+                    tickers=_wf_cfg["universe"]["tickers"],
+                    full_start=_wf_start_d,
+                    full_end=_wf_end_d,
+                    window_months=int(_wf_win),
+                    kronos_model_size="mini",  # fast for UI
+                    run_agents=False,
+                    momentum_blend=_wf_cfg["alpha"]["momentum_blend"],
+                    top_n=_wf_cfg["alpha"]["top_n"],
+                    progress_cb=_wf_progress,
+                )
+            except Exception as _e:
+                _wf_err, _wf_tb = _e, _wftb.format_exc()
 
             if _wf_err:
                 st.error(f"Walk-forward failed: {_wf_err}")
