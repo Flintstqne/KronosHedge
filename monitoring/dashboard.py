@@ -2722,13 +2722,12 @@ elif page == "Forward Sim":
 # ═════════════════════════════════════════════════════════════════════════════
 
 elif page == "Stress Test":
-    import json as _stj
-    from pathlib import Path as _STP
+    import json as _json_st
 
     st.title("Stress Test")
     st.caption("Replay current portfolio weights against historical market crises.")
 
-    _st_path = _STP("logs/stress_test.json")
+    _st_path = Path("logs/stress_test.json")
 
     _st_col, _st_btn_col = st.columns([4, 1])
     with _st_btn_col:
@@ -2754,9 +2753,9 @@ elif page == "Stress Test":
         st.stop()
 
     try:
-        _st_data = json.loads(_st_path.read_text())
-    except Exception:
-        st.error("Could not read stress test results.")
+        _st_data = _json_st.loads(_st_path.read_text())
+    except Exception as _st_parse_err:
+        st.error(f"Could not read stress test results: {_st_parse_err}")
         st.stop()
 
     _st_computed = _st_data.get("computed_at", "—")[:16]
