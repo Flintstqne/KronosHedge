@@ -1355,8 +1355,8 @@ elif page == "Backtest":
                 with st.expander("Traceback"):
                     st.code(_wf_tb)
             elif _wf_df is not None and len(_wf_df) > 1:
-                _wf_data = _wf_df[_wf_df["window"] != "MEAN"].copy()
-                _wf_mean = _wf_df[_wf_df["window"] == "MEAN"]
+                _wf_data = _wf_df[_wf_df["start"] != "MEAN"].copy()
+                _wf_mean = _wf_df[_wf_df["start"] == "MEAN"]
 
                 _pos_wins = (_wf_data["total_return"] > 0).sum()
                 _tot_wins = len(_wf_data)
@@ -1370,10 +1370,11 @@ elif page == "Backtest":
                     _wm4.metric("Mean Sharpe", f"{float(_wf_mean['sharpe_ratio'].iloc[0]):.2f}")
 
                 # Bar chart — return per window
+                _wf_labels = _wf_data["start"].astype(str) + " → " + _wf_data["end"].astype(str)
                 _wf_fig = go.Figure()
                 _wf_colors = [C_BULL if r > 0 else C_BEAR for r in _wf_data["total_return"]]
                 _wf_fig.add_trace(go.Bar(
-                    x=_wf_data["window"].astype(str),
+                    x=_wf_labels,
                     y=(_wf_data["total_return"] * 100).round(2),
                     marker_color=_wf_colors,
                     text=[f"{v:+.1f}%" for v in (_wf_data["total_return"] * 100)],
