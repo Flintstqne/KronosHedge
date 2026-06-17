@@ -200,6 +200,7 @@ class Backtester:
         kronos_model_size: str = "small",
         kronos_horizon: int = 5,
         kronos_device: str = "cpu",
+        kronos_model_source: str = "chronos",  # "chronos" | "sy-kronos"
         qlib_weight: float = 0.60,
         agent_weight: float = 0.40,
         llm_provider: str = "anthropic",
@@ -230,6 +231,7 @@ class Backtester:
         self.kronos_model_size = kronos_model_size
         self.kronos_horizon = kronos_horizon
         self.kronos_device = kronos_device
+        self.kronos_model_source = kronos_model_source
         self.qlib_weight = qlib_weight
         self.agent_weight = agent_weight
         self.llm_provider = llm_provider
@@ -263,6 +265,7 @@ class Backtester:
             model_size=self.kronos_model_size,
             horizon=self.kronos_horizon,
             device=self.kronos_device,
+            model_source=self.kronos_model_source,
         )
         cache = PredictionCache()
         alpha = KronosAlphaFactor(

@@ -4,9 +4,13 @@ KronosSignalBridge: wraps KronosPredictor, produces structured ForecastSignal pe
 
 from __future__ import annotations
 
+import sys
 import warnings
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
+
+_VENDOR_PATH = str(Path(__file__).resolve().parents[1] / "vendor" / "sy_kronos")
 
 import numpy as np
 import pandas as pd
@@ -75,38 +79,49 @@ class KronosSignalBridge:
     Falls back to a naive last-value baseline if Kronos not installed.
     """
 
-    def __init__(self, model_size: str = "small", horizon: int = 5, device: str = "cpu"):
+    def __init__(
+        self,
+        model_size: str = "small",
+        horizon: int = 5,
+        device: str = "cpu",
+        model_source: str = "chronos",  # "chronos" | "sy-kronos"
+    ):
         self.model_size = model_size
         self.horizon = horizon
         self.device = device
+        self.model_source = model_source
         self._predictor = None
 
     def _load(self):
         if self._predictor is not None:
             return
-        try:
-            from kronos import KronosPredictor  # type: ignore
-            self._predictor = KronosPredictor(
-                model_name=f"Kronos-{self.model_size}",
-                device=self.device,
-            )
-            warnings.warn("Loaded original Kronos model.", stacklevel=2)
-        except ImportError:
-            # Try Amazon Chronos as the real foundation model replacement
+        if self.model_source == "sy-kronos":
             try:
-                self._predictor = _ChronosPredictor(
+                self._predictor = _SyKronosPredictor(
                     model_size=self.model_size, device=self.device
                 )
                 warnings.warn(
-                    f"Loaded Amazon Chronos (chronos-t5-{self.model_size}) as predictor.",
+                    f"Loaded shiyu-coder Kronos-{self.model_size} as predictor.",
                     stacklevel=2,
                 )
-            except Exception as chronos_err:
-                warnings.warn(
-                    f"Chronos unavailable ({chronos_err}). Using naive baseline predictor.",
-                    stacklevel=2,
-                )
-                self._predictor = _NaivePredictor()
+                return
+            except Exception as e:
+                warnings.warn(f"sy-kronos load failed ({e}), falling back to Chronos.", stacklevel=2)
+        # Default: Amazon Chronos
+        try:
+            self._predictor = _ChronosPredictor(
+                model_size=self.model_size, device=self.device
+            )
+            warnings.warn(
+                f"Loaded Amazon Chronos (chronos-t5-{self.model_size}) as predictor.",
+                stacklevel=2,
+            )
+        except Exception as chronos_err:
+            warnings.warn(
+                f"Chronos unavailable ({chronos_err}). Using naive baseline predictor.",
+                stacklevel=2,
+            )
+            self._predictor = _NaivePredictor()
 
     def generate(self, ticker: str, df: pd.DataFrame) -> ForecastSignal:
         """Generate ForecastSignal for a single ticker."""
@@ -234,6 +249,48 @@ class _ChronosPredictor:
             start=df.index[-1], periods=pred_len + 1, freq="B"
         )[1:]
         return pd.DataFrame(rows, index=future_dates)
+
+
+class _SyKronosPredictor:
+    """
+    Wraps shiyu-coder/Kronos (NeoQuasar/Kronos-{base,small,mini}).
+    Financial-native OHLCV model trained on 45+ global exchanges.
+    Requires vendor/sy_kronos cloned from github.com/shiyu-coder/Kronos.
+    """
+
+    _TOKENIZER = {
+        "mini":  "NeoQuasar/Kronos-Tokenizer-2k",
+        "small": "NeoQuasar/Kronos-Tokenizer-base",
+        "base":  "NeoQuasar/Kronos-Tokenizer-base",
+    }
+    _MAX_CTX = {"mini": 2048, "small": 512, "base": 512}
+
+    def __init__(self, model_size: str = "base", device: str = "cpu"):
+        if _VENDOR_PATH not in sys.path:
+            sys.path.insert(0, _VENDOR_PATH)
+        from model import Kronos, KronosTokenizer, KronosPredictor as _KP  # type: ignore
+        tok = KronosTokenizer.from_pretrained(self._TOKENIZER.get(model_size, "NeoQuasar/Kronos-Tokenizer-base"))
+        mdl = Kronos.from_pretrained(f"NeoQuasar/Kronos-{model_size}")
+        self._pred = _KP(mdl, tok, max_context=self._MAX_CTX.get(model_size, 512))
+
+    def predict(self, df: pd.DataFrame, pred_len: int) -> pd.DataFrame:
+        x_df = df[["open", "high", "low", "close"]].copy()
+        x_ts = pd.Series(df.index.astype(str) if not hasattr(df.index, "strftime")
+                         else df.index, name="timestamps")
+        y_ts = pd.Series(
+            pd.date_range(start=df.index[-1], periods=pred_len + 1, freq="B")[1:],
+            name="timestamps",
+        )
+        out = self._pred.predict(
+            df=x_df, x_timestamp=x_ts, y_timestamp=y_ts,
+            pred_len=pred_len, T=1.0, top_p=0.9, sample_count=1,
+        )
+        out = out.set_index(y_ts.values) if not isinstance(out.index, pd.DatetimeIndex) else out
+        if "volume" not in out.columns:
+            out["volume"] = float(df["volume"].iloc[-1])
+        if "amount" not in out.columns:
+            out["amount"] = out["close"] * out["volume"]
+        return out
 
 
 class _NaivePredictor:

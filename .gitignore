@@ -47,5 +47,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Vendored third-party source (cloned, not committed)
+vendor/
+
 # Claude Code project files
 .claude/
