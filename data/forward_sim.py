@@ -171,11 +171,18 @@ def run(n_paths: int = N_PATHS, horizon: int = HORIZON) -> dict:
         return [{"date": date_by_day[d], "equity": round(float(np.percentile(equities_by_day[d], pct)), 2)}
                 for d in range(n_days)]
 
+    _kron = yaml.safe_load(open("config/settings.yaml"))["kronos"]
     result = {
         "simulation_date":  sim_date,
         "horizon_days":     horizon,
         "n_paths":          n_paths,
         "initial_equity":   round(initial, 2),
+        "settings": {
+            "n_paths":       n_paths,
+            "horizon":       horizon,
+            "model_size":    _kron.get("model_size"),
+            "model_source":  _kron.get("model_source", "chronos"),
+        },
         "tickers":          ticker_data,
         "portfolio_paths":  portfolio_paths,
         "portfolio_median": _pct_curve(50),

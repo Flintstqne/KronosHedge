@@ -2301,6 +2301,26 @@ elif page == "Forward Sim":
             f"Run: **{_sim_date}** &nbsp;·&nbsp; {_n_paths} paths &nbsp;·&nbsp; {_horizon} trading days ahead"
         )
 
+    # ── Stale-settings warning ────────────────────────────────────────────────
+    try:
+        import yaml as _fsy
+        from data.forward_sim import N_PATHS as _FS_N_PATHS, HORIZON as _FS_HORIZON
+        _fsk  = _fsy.safe_load(open("config/settings.yaml"))["kronos"]
+        _want = {
+            "n_paths":      _FS_N_PATHS,
+            "horizon":      _FS_HORIZON,
+            "model_size":   _fsk.get("model_size"),
+            "model_source": _fsk.get("model_source", "chronos"),
+        }
+        _have = _sim.get("settings", {})
+        _diffs = [f"**{k}**: saved `{_have.get(k)}` → current `{v}`"
+                  for k, v in _want.items() if _have.get(k) != v]
+        if _diffs:
+            st.warning("Simulation is stale — settings have changed. Re-run to update.\n\n"
+                       + " &nbsp;·&nbsp; ".join(_diffs))
+    except Exception:
+        pass
+
     # ── Portfolio equity curve ────────────────────────────────────────────────
     st.subheader("Simulated Portfolio Equity")
 
