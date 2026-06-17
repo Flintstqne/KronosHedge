@@ -36,22 +36,32 @@ def run(weights: dict[str, float] | None = None) -> dict:
 
     for name, (start, end) in SCENARIOS.items():
         try:
-            raw = yf.download(list(active.keys()), start=start, end=end,
-                              progress=False, auto_adjust=True)
+            import warnings as _w
+            with _w.catch_warnings():
+                _w.simplefilter("ignore")
+                raw = yf.download(list(active.keys()), start=start, end=end,
+                                  progress=False, auto_adjust=True)
             if raw.empty:
                 continue
 
             closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
+            # Drop tickers that have no data at all for this period
+            closes = closes.dropna(axis=1, how="all")
             returns = closes.pct_change().dropna()
 
+            # Re-normalise weights to only the tickers that have data
+            avail_w = {t: w for t, w in active.items() if t in returns.columns}
+            total_avail = sum(avail_w.values()) or 1.0
+            avail_w = {t: w / total_avail for t, w in avail_w.items()}
+
             port_ret = pd.Series(0.0, index=returns.index)
-            for t, w in active.items():
-                if t in returns.columns:
-                    port_ret += w * returns[t].fillna(0)
+            for t, w in avail_w.items():
+                port_ret += w * returns[t].fillna(0)
 
             equity = [100.0]
             for r in port_ret:
-                equity.append(round(equity[-1] * (1 + float(r)), 2))
+                rv = float(r) if np.isfinite(float(r)) else 0.0
+                equity.append(round(equity[-1] * (1 + rv), 2))
 
             dates = [str(returns.index[0].date())] + [str(d.date()) for d in returns.index]
             eq_arr = np.array(equity)
@@ -74,7 +84,8 @@ def run(weights: dict[str, float] | None = None) -> dict:
         "scenarios":    scenarios_out,
     }
     STRESS_PATH.parent.mkdir(exist_ok=True)
-    STRESS_PATH.write_text(json.dumps(result, indent=2))
+    STRESS_PATH.write_text(json.dumps(result, indent=2, allow_nan=False,
+                                      default=lambda x: None if isinstance(x, float) and not np.isfinite(x) else str(x)))
     return result
 
 
