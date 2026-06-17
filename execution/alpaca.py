@@ -69,6 +69,16 @@ class AlpacaAdapter(BrokerAdapter):
             fill_price=fill_price,
         )
 
+    def close_position(self, ticker: str) -> Order:
+        resp = self._client.close_position(ticker)
+        return Order(
+            ticker=ticker,
+            side="sell",
+            notional_usd=0.0,
+            order_id=str(resp.id),
+            status=str(resp.status),
+        )
+
     def cancel_all_orders(self) -> None:
         self._client.cancel_orders()
 
