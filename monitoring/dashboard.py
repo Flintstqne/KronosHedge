@@ -2771,7 +2771,16 @@ elif page == "Stress Test":
 
     # ── Summary cards ─────────────────────────────────────────────────────────
     _st_scenarios = _st_data.get("scenarios", {})
-    _valid = {k: v for k, v in _st_scenarios.items() if "error" not in v}
+    _valid   = {k: v for k, v in _st_scenarios.items() if "error" not in v}
+    _errored = {k: v for k, v in _st_scenarios.items() if "error" in v}
+
+    if not _st_scenarios:
+        st.warning("No scenario data found in the results file. Try running again.")
+        st.stop()
+
+    for _ename, _ev in _errored.items():
+        st.error(f"**{_ename}** failed: {_ev['error']}")
+
     if _valid:
         _sc_cols = st.columns(len(_valid))
         for i, (name, s) in enumerate(_valid.items()):
@@ -2790,16 +2799,18 @@ elif page == "Stress Test":
     for name, s in _valid.items():
         ec = s.get("equity_curve", [])
         if not ec:
+            st.warning(f"{name}: equity curve is empty")
             continue
         _ec_df = pd.DataFrame(ec)
         _color  = _SCENARIO_COLORS.get(name, C_BLUE)
+        _r, _g, _b = int(_color[1:3], 16), int(_color[3:5], 16), int(_color[5:7], 16)
         _fig_st = go.Figure()
         _fig_st.add_trace(go.Scatter(
             x=_ec_df["date"], y=_ec_df["value"],
             mode="lines", name=name,
             line=dict(color=_color, width=2),
             fill="tozeroy",
-            fillcolor=f"rgba({int(_color[1:3],16)},{int(_color[3:5],16)},{int(_color[5:7],16)},0.08)",
+            fillcolor=f"rgba({_r},{_g},{_b},0.08)",
         ))
         _fig_st.add_hline(y=100, line_dash="dash", line_color="#555", line_width=1)
         _fig_st.update_layout(
