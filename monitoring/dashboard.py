@@ -2839,15 +2839,35 @@ elif page == "Stress Test":
 # ═════════════════════════════════════════════════════════════════════════════
 
 elif page == "Settings":
+    import base64 as _b64
     import yaml as _sy
 
+    def _push_settings_to_github(yaml_str: str) -> tuple[bool, str]:
+        """Commit config/settings.yaml to the repo via GitHub Contents API."""
+        import httpx as _hx
+        token = os.getenv("GITHUB_PAT")
+        repo  = os.getenv("GITHUB_REPOSITORY", "Flintstqne/KronosHedge")
+        if not token:
+            return False, "GITHUB_PAT not set in secrets — file saved locally only."
+        path    = "config/settings.yaml"
+        headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+        # Fetch current SHA (required for update)
+        r = _hx.get(f"https://api.github.com/repos/{repo}/contents/{path}", headers=headers, timeout=10)
+        sha = r.json().get("sha", "") if r.is_success else ""
+        payload = {
+            "message": "chore: update strategy settings from dashboard [skip ci]",
+            "content": _b64.b64encode(yaml_str.encode()).decode(),
+        }
+        if sha:
+            payload["sha"] = sha
+        r2 = _hx.put(f"https://api.github.com/repos/{repo}/contents/{path}",
+                     headers=headers, json=payload, timeout=10)
+        if r2.is_success:
+            return True, "Settings saved and committed to GitHub."
+        return False, f"GitHub API error {r2.status_code}: {r2.text[:200]}"
+
     st.title("Strategy Settings")
-    st.caption("Changes write to `config/settings.yaml` and take effect on the next run cycle.")
-    st.info(
-        "On Streamlit Cloud, edits persist until the next redeploy. "
-        "To make them permanent, commit `config/settings.yaml` to the repo after saving.",
-        icon="ℹ️",
-    )
+    st.caption("Changes are saved to `config/settings.yaml` and committed to the repo automatically.")
 
     try:
         _cfg = _sy.safe_load(open("config/settings.yaml"))
@@ -2971,12 +2991,16 @@ elif page == "Settings":
             _cfg[section][field] = val
 
         try:
+            _yaml_str = _sy.dump(_cfg, default_flow_style=False, sort_keys=False)
             with open("config/settings.yaml", "w") as _f:
-                _sy.dump(_cfg, _f, default_flow_style=False, sort_keys=False)
-            st.success("Settings saved to config/settings.yaml.")
-            st.caption("Commit the file to make changes permanent across deploys.")
+                _f.write(_yaml_str)
+            _ok, _msg = _push_settings_to_github(_yaml_str)
+            if _ok:
+                st.success(_msg)
+            else:
+                st.warning(_msg)
         except Exception as _se:
-            st.error(f"Could not write settings: {_se}")
+            st.error(f"Could not save settings: {_se}")
 
     with st.expander("Raw YAML (current)"):
         st.code(_sy.dump(_cfg, default_flow_style=False, sort_keys=False), language="yaml")
