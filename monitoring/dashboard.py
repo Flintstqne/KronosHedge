@@ -2734,7 +2734,9 @@ elif page == "Stress Test":
         if st.button("Run Stress Test", help="Fetches historical prices for all 4 scenarios (~30s)"):
             with st.spinner("Fetching historical prices…"):
                 try:
-                    from data.stress_test import run as _st_run
+                    import importlib, data.stress_test as _st_mod
+                    importlib.reload(_st_mod)
+                    _st_run = _st_mod.run
                     from monitoring.logger import AuditLogger as _stAL
                     _st_weights = {}
                     try:
