@@ -89,14 +89,16 @@ def _fetch_alpaca_live() -> dict | None:
         from execution.alpaca import AlpacaAdapter
         paper = os.getenv("ALPACA_PAPER", "true").lower() != "false"
         adapter = AlpacaAdapter(paper=paper)
-        equity    = adapter.get_equity()
-        positions = adapter.get_positions()
-        history   = adapter.get_portfolio_history("1M")
+        equity      = adapter.get_equity()
+        positions   = adapter.get_positions()
+        history     = adapter.get_portfolio_history("1M")
+        realized_pl = adapter.get_realized_pl()
         return {
-            "equity":    equity,
-            "mode":      "Paper" if paper else "Live",
-            "positions": positions,
-            "history":   history,
+            "equity":      equity,
+            "mode":        "Paper" if paper else "Live",
+            "positions":   positions,
+            "history":     history,
+            "realized_pl": realized_pl,
         }
     except Exception as exc:
         return {"error": str(exc)}
@@ -1649,8 +1651,8 @@ elif page == "News":
 
         st.dataframe(
             _ec_df.style
-                .applymap(_color_kron, subset=["Kronos Signal"])
-                .applymap(_color_days, subset=["Days Away"]),
+                .map(_color_kron, subset=["Kronos Signal"])
+                .map(_color_days, subset=["Days Away"]),
             use_container_width=True, hide_index=True,
         )
     else:
@@ -1827,17 +1829,20 @@ elif page == "Portfolio":
     _history   = _alpaca.get("history")
 
     # ── Top metrics ───────────────────────────────────────────────────────────
-    _total_mv  = sum(float(p.market_value) for p in _positions.values())
-    _total_upl = sum(float(p.unrealized_pl) for p in _positions.values())
-    _cash      = _equity - _total_mv
+    _total_mv   = sum(float(p.market_value) for p in _positions.values())
+    _total_upl  = sum(float(p.unrealized_pl) for p in _positions.values())
+    _cash       = _equity - _total_mv
+    _realized   = _alpaca.get("realized_pl", 0.0)
 
-    _pm1, _pm2, _pm3, _pm4 = st.columns(4)
-    _pm1.metric("Account equity",    f"${_equity:,.2f}")
-    _pm2.metric("Invested",          f"${_total_mv:,.2f}")
-    _pm3.metric("Cash",              f"${_cash:,.2f}")
-    _pm4.metric("Unrealised P&L",    f"${_total_upl:+,.2f}",
+    _pm1, _pm2, _pm3, _pm4, _pm5 = st.columns(5)
+    _pm1.metric("Account equity",  f"${_equity:,.2f}")
+    _pm2.metric("Invested",        f"${_total_mv:,.2f}")
+    _pm3.metric("Cash",            f"${_cash:,.2f}")
+    _pm4.metric("Unrealised P&L",  f"${_total_upl:+,.2f}",
                 delta=f"{_total_upl / (_equity - _total_upl) * 100:+.2f}%" if (_equity - _total_upl) > 0 else None,
                 delta_color="normal" if _total_upl >= 0 else "inverse")
+    _pm5.metric("Realised P&L",    f"${_realized:+,.2f}",
+                delta_color="normal" if _realized >= 0 else "inverse")
 
     st.divider()
 
@@ -1905,8 +1910,8 @@ elif page == "Portfolio":
 
         st.dataframe(
             _pos_df.style
-                .applymap(_color_pl, subset=["Unrealised P&L", "Return %"])
-                .applymap(_color_side, subset=["Side"])
+                .map(_color_pl, subset=["Unrealised P&L", "Return %"])
+                .map(_color_side, subset=["Side"])
                 .format({
                     "Avg Entry": "${:.2f}", "Current Price": "${:.2f}",
                     "Market Value": "${:,.2f}", "Unrealised P&L": "${:+,.2f}",
@@ -2007,7 +2012,7 @@ elif page == "Trade Log":
     _styled = (
         _view.sort_values("Date", ascending=False)
         .reset_index(drop=True)
-        .style.applymap(_color_side, subset=["Side"])
+        .style.map(_color_side, subset=["Side"])
         .format({"Notional ($)": "${:,.2f}", "Equity ($)": "${:,.2f}"})
     )
     st.dataframe(_styled, use_container_width=True, height=500)
