@@ -1356,7 +1356,8 @@ elif page == "Backtest":
                     full_start=_wf_start_d,
                     full_end=_wf_end_d,
                     window_months=int(_wf_win),
-                    kronos_model_size="mini",  # fast for UI
+                    kronos_model_size=_wf_cfg["kronos"]["model_size"],
+                    kronos_model_source=_wf_cfg["kronos"].get("model_source", "chronos"),
                     run_agents=False,
                     momentum_blend=_wf_cfg["alpha"]["momentum_blend"],
                     top_n=_wf_cfg["alpha"]["top_n"],

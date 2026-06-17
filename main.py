@@ -194,7 +194,20 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
              vix=round(vix, 1),
              pead_beaters=list(pead_signals.keys()))
 
-    # ── 3b. Qlib alpha + Agent pipeline ──────────────────────────────────────
+    # ── 3b. Load options + insider data (collected by Actions alongside main run) ─
+    from data.options_collector import OPT_PATH
+    from data.insider import INSIDER_PATH
+    try:
+        options_data = json.loads(OPT_PATH.read_text()).get("tickers", {}) if OPT_PATH.exists() else {}
+    except Exception:
+        options_data = {}
+    try:
+        insider_data = json.loads(INSIDER_PATH.read_text()).get("transactions", []) if INSIDER_PATH.exists() else []
+    except Exception:
+        insider_data = []
+    log.info("alt_data_loaded", options_tickers=len(options_data), insider_filings=len(insider_data))
+
+    # ── 3c. Qlib alpha + Agent pipeline ──────────────────────────────────────
     # Build 60-day vol window and 273-day momentum window from the long fetch.
     vol_window: dict = {t: df.tail(kronos_cfg["lookback_days"]) for t, df in universe.items()}
     mom_window: dict = {t: df.tail(273) for t, df in universe.items()}
@@ -222,6 +235,8 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
         enabled_agents=agent_cfg.get("enabled", []),
         max_position_pct=exec_cfg["max_position_pct"],
         news_context=news_context,
+        options_data=options_data,
+        insider_data=insider_data,
     )
     log.info("agents_done")
 
@@ -340,18 +355,71 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
     log.info("cycle_complete", run_id=run_id)
 
 
+def run_stop_check(cfg: dict, dry_run: bool = False) -> None:
+    """Lightweight intraday trailing-stop check. No Kronos, no agents — just prices vs peaks."""
+    from data.intraday import market_is_open
+    from execution.alpaca import AlpacaAdapter
+    from execution.executor import PortfolioExecutor
+
+    if not market_is_open():
+        log.info("market_closed_skipping")
+        return
+
+    exec_cfg = cfg["execution"]
+    risk_cfg  = cfg.get("risk", {})
+    trailing_stop = risk_cfg.get("trailing_stop", 0.07)
+
+    broker    = AlpacaAdapter(paper=exec_cfg.get("paper", True))
+    positions = broker.get_positions()
+
+    if not positions:
+        log.info("stop_check_no_positions")
+        return
+
+    # Use Alpaca's live market_value / qty as the current price (no extra network call)
+    position_prices = {t: p.market_value / p.qty for t, p in positions.items() if p.qty}
+
+    risk_state = _load_risk_state()
+    peaks = dict(risk_state.get("price_peaks", {}))
+    exits: list[str] = []
+
+    for ticker, price in position_prices.items():
+        peak = max(peaks.get(ticker, price), price)
+        peaks[ticker] = peak
+        drawdown = price / peak - 1
+        if drawdown < -trailing_stop:
+            log.info("stop_check_triggered", ticker=ticker,
+                     drawdown=f"{drawdown:.2%}", price=round(price, 2), peak=round(peak, 2))
+            exits.append(ticker)
+            peaks.pop(ticker, None)
+
+    risk_state["price_peaks"] = {t: v for t, v in peaks.items() if t in positions}
+    _save_risk_state(risk_state)
+
+    if exits:
+        executor = PortfolioExecutor(broker=broker, min_order_usd=exec_cfg["min_order_usd"], dry_run=dry_run)
+        for ticker in exits:
+            executor._close(ticker)
+        log.info("stop_check_exits", tickers=exits, dry_run=dry_run)
+    else:
+        log.info("stop_check_clean", positions=len(positions))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Kronos Hedge run cycle")
     parser.add_argument("--config", default="config/settings.yaml")
     parser.add_argument("--dry-run", action="store_true", help="No real orders placed")
     parser.add_argument("--date", help="Target date YYYY-MM-DD (default: today)")
-    parser.add_argument("--mode", choices=["daily", "intraday"], default="daily",
-                        help="daily=EOD signals, intraday=10am live prices")
+    parser.add_argument("--mode", choices=["daily", "intraday", "stop_check"], default="daily",
+                        help="daily=EOD, intraday=10am live prices, stop_check=trailing stop only")
     args = parser.parse_args()
 
     cfg = load_config(args.config)
-    target_date = date.fromisoformat(args.date) if args.date else None
-    run_cycle(cfg, target_date=target_date, dry_run=args.dry_run, mode=args.mode)
+    if args.mode == "stop_check":
+        run_stop_check(cfg, dry_run=args.dry_run)
+    else:
+        target_date = date.fromisoformat(args.date) if args.date else None
+        run_cycle(cfg, target_date=target_date, dry_run=args.dry_run, mode=args.mode)
 
 
 if __name__ == "__main__":
