@@ -34,32 +34,51 @@ def run(weights: dict[str, float] | None = None) -> dict:
 
     scenarios_out: dict = {}
 
+    import warnings as _w
+
     for name, (start, end) in SCENARIOS.items():
         try:
-            import warnings as _w
-            with _w.catch_warnings():
-                _w.simplefilter("ignore")
-                raw = yf.download(list(active.keys()), start=start, end=end,
-                                  progress=False, auto_adjust=True)
-            if raw.empty:
+            # Download each ticker individually — batch download raises when
+            # any ticker has no history for the period (e.g. SPCX pre-2021)
+            ticker_closes: dict[str, pd.Series] = {}
+            for ticker in list(active.keys()):
+                try:
+                    with _w.catch_warnings():
+                        _w.simplefilter("ignore")
+                        raw = yf.download(ticker, start=start, end=end,
+                                          progress=False, auto_adjust=True)
+                    if raw.empty:
+                        continue
+                    close_col = "Close" if "Close" in raw.columns else raw.columns[0]
+                    s = raw[close_col].dropna()
+                    if len(s) > 1:
+                        ticker_closes[ticker] = s
+                except Exception:
+                    continue
+
+            if not ticker_closes:
+                scenarios_out[name] = {"error": "no tickers returned data for this period"}
                 continue
 
-            closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw.to_frame()
-            # Drop tickers with no data at all; ffill gaps within the period
-            closes = closes.dropna(axis=1, how="all").ffill()
-            # pct_change → drop first row (always NaN) → fill any remaining gaps with 0
+            # Align on a common date index, forward-fill gaps
+            closes = pd.DataFrame(ticker_closes).ffill()
             returns = closes.pct_change().iloc[1:].fillna(0)
 
             if returns.empty:
-                scenarios_out[name] = {"error": "no return data after cleaning"}
+                scenarios_out[name] = {"error": "returns empty after cleaning"}
                 continue
 
-            # Re-normalise weights to tickers that survived
+            # Normalise weights to tickers that have data
             avail_w = {t: w for t, w in active.items() if t in returns.columns}
-            total_avail = sum(avail_w.values()) or 1.0
+            if not avail_w:
+                scenarios_out[name] = {"error": "none of the weighted tickers have data"}
+                continue
+            total_avail = sum(avail_w.values())
             avail_w = {t: w / total_avail for t, w in avail_w.items()}
 
-            port_ret = sum(w * returns[t] for t, w in avail_w.items())
+            port_ret = pd.Series(0.0, index=returns.index)
+            for t, w in avail_w.items():
+                port_ret += w * returns[t].fillna(0)
 
             equity = [100.0]
             for r in port_ret:
@@ -74,6 +93,7 @@ def run(weights: dict[str, float] | None = None) -> dict:
             scenarios_out[name] = {
                 "start":        start,
                 "end":          end,
+                "tickers_used": len(avail_w),
                 "total_return": round(float(equity[-1] / equity[0] - 1), 4),
                 "max_drawdown": round(max_dd, 4),
                 "equity_curve": [{"date": d, "value": e} for d, e in zip(dates, equity)],
