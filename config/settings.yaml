@@ -105,6 +105,8 @@ agents:
     - warren_buffett
     - peter_lynch
     - charlie_munger
+    - benjamin_graham
+    - george_soros
 
 alpha:
   momentum_blend: 0.80   # fraction of score from 12M-1M cross-sectional momentum vs Kronos
