@@ -374,8 +374,12 @@ def apply_macro_risk(
     """
     Shrinks position sizes near high-risk events:
       - FOMC in <= fomc_window_days  → scale all weights by 0.65
+      - CPI within 1 day             → scale all weights by 0.75
+      - NFP within 1 day             → scale all weights by 0.85
       - Earnings in <= earnings_window_days → scale that ticker by 0.50
     """
+    from data.economic_calendar import upcoming_events as _cal_events
+
     result = dict(weights)
 
     fomc_imminent = any(
@@ -385,6 +389,14 @@ def apply_macro_risk(
     )
     if fomc_imminent:
         result = {t: w * 0.65 for t, w in result.items()}
+
+    # CPI and NFP from economic_calendar (not duplicated in news_context)
+    cal_today = {e["type"] for e in _cal_events(days_ahead=1)}
+    if not fomc_imminent:
+        if "CPI" in cal_today:
+            result = {t: w * 0.75 for t, w in result.items()}
+        elif "NFP" in cal_today:
+            result = {t: w * 0.85 for t, w in result.items()}
 
     for ev in news_context.get("earnings", []):
         if 0 <= ev["days_away"] <= earnings_window_days and ev["ticker"] in result:

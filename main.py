@@ -73,6 +73,35 @@ def _apply_trailing_stops(
     return result, peaks
 
 
+def _conviction_scores(agent_state: dict, kronos_signals: dict) -> dict[str, float]:
+    """Per-ticker conviction in [0, 1]: 0.5=neutral, 1=max bullish, 0=max bearish.
+    Blends agent consensus (60%) with Kronos confidence (40%)."""
+    signal_keys = ["technical_signals", "fundamental_signals", "sentiment_signals",
+                   "valuation_signals", "news_sentiment_signals"]
+    scores = {}
+    for ticker in kronos_signals:
+        bull = bear = neutral = 0
+        for key in signal_keys:
+            sig = (agent_state.get(key) or {}).get(ticker) or {}
+            if isinstance(sig, dict):
+                v = sig.get("signal", "neutral")
+                bull    += v == "bullish"
+                bear    += v == "bearish"
+                neutral += v == "neutral"
+        for inv_sig in ((agent_state.get("investor_signals") or {}).get(ticker) or {}).values():
+            if isinstance(inv_sig, dict):
+                v = inv_sig.get("signal", "neutral")
+                bull    += v == "bullish"
+                bear    += v == "bearish"
+                neutral += v == "neutral"
+        total = bull + bear + neutral
+        net = (bull - bear) / max(total, 1)      # [-1, 1]
+        agent_conv = (net + 1) / 2               # [0, 1]
+        kconf = kronos_signals[ticker].confidence / 100.0
+        scores[ticker] = 0.60 * agent_conv + 0.40 * kconf
+    return scores
+
+
 def _apply_circuit_breaker(
     weights: dict[str, float],
     equity: float,
@@ -278,6 +307,23 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
     regime = str(_regime_series.asof(_today_ts)) if len(_regime_series) and _today_ts >= _regime_series.index[0] else "risk_on"
     final_weights = apply_regime_filter(final_weights, regime, spy_in_prices="SPY" in tickers)
     log.info("regime", regime=regime)
+
+    # ── 5b. Conviction-weighted sizing ───────────────────────────────────────────
+    # conviction=0→0.4x, conviction=0.5(neutral)→1.0x, conviction=1.0→1.6x
+    conviction = _conviction_scores(agent_state, kronos_signals)
+    final_weights = {t: w * max(0.4, min(1.6, 2.0 * conviction.get(t, 0.5)))
+                     for t, w in final_weights.items()}
+    # Renormalize longs, re-apply max_position cap
+    _lt = sum(v for v in final_weights.values() if v > 0)
+    if _lt > 0:
+        _cap = exec_cfg["max_position_pct"]
+        final_weights = {t: min(w / _lt, _cap) if w > 0 else w for t, w in final_weights.items()}
+        _lt2 = sum(v for v in final_weights.values() if v > 0)
+        if _lt2 > 0:
+            final_weights = {t: w / _lt2 if w > 0 else w for t, w in final_weights.items()}
+    log.info("conviction_applied", top5=sorted(
+        [(t, round(conviction.get(t, 0.5), 2)) for t in final_weights if final_weights[t] > 0],
+        key=lambda x: -x[1])[:5])
 
     log.info("reconciled", weights=final_weights)
     broker   = AlpacaAdapter(paper=exec_cfg.get("paper", True))
