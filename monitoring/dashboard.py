@@ -2280,7 +2280,7 @@ elif page == "Forward Sim":
 
     with _sim_col:
         if st.button("Run Simulation", help="Takes ~2 min — downloads model on first run"):
-            with st.spinner("Running 8-path forward simulation…"):
+            with st.spinner("Running 64-path forward simulation — expect 15–30 min on CPU…"):
                 try:
                     from data.forward_sim import run as _fs_run
                     _sim = _fs_run()

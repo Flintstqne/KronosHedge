@@ -15,7 +15,7 @@ import yaml
 
 SIM_PATH = Path("logs/forward_sim.json")
 HORIZON  = 21
-N_PATHS  = 16
+N_PATHS  = 64
 
 
 def run(n_paths: int = N_PATHS, horizon: int = HORIZON) -> dict:
