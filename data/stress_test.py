@@ -44,26 +44,29 @@ def run(weights: dict[str, float] | None = None) -> dict:
             if raw.empty:
                 continue
 
-            closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw
-            # Drop tickers that have no data at all for this period
-            closes = closes.dropna(axis=1, how="all")
-            returns = closes.pct_change().dropna()
+            closes = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw.to_frame()
+            # Drop tickers with no data at all; ffill gaps within the period
+            closes = closes.dropna(axis=1, how="all").ffill()
+            # pct_change → drop first row (always NaN) → fill any remaining gaps with 0
+            returns = closes.pct_change().iloc[1:].fillna(0)
 
-            # Re-normalise weights to only the tickers that have data
+            if returns.empty:
+                scenarios_out[name] = {"error": "no return data after cleaning"}
+                continue
+
+            # Re-normalise weights to tickers that survived
             avail_w = {t: w for t, w in active.items() if t in returns.columns}
             total_avail = sum(avail_w.values()) or 1.0
             avail_w = {t: w / total_avail for t, w in avail_w.items()}
 
-            port_ret = pd.Series(0.0, index=returns.index)
-            for t, w in avail_w.items():
-                port_ret += w * returns[t].fillna(0)
+            port_ret = sum(w * returns[t] for t, w in avail_w.items())
 
             equity = [100.0]
             for r in port_ret:
                 rv = float(r) if np.isfinite(float(r)) else 0.0
                 equity.append(round(equity[-1] * (1 + rv), 2))
 
-            dates = [str(returns.index[0].date())] + [str(d.date()) for d in returns.index]
+            dates = [start] + [str(d.date()) for d in returns.index]
             eq_arr = np.array(equity)
             peak = np.maximum.accumulate(eq_arr)
             max_dd = float(np.min((eq_arr - peak) / peak))
