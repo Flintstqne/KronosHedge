@@ -89,10 +89,11 @@ def _fetch_alpaca_live() -> dict | None:
         from execution.alpaca import AlpacaAdapter
         paper = os.getenv("ALPACA_PAPER", "true").lower() != "false"
         adapter = AlpacaAdapter(paper=paper)
-        equity      = adapter.get_equity()
+        account     = adapter._client.get_account()
+        equity      = float(account.equity)
+        realized_pl = float(getattr(account, "realized_pl", None) or 0.0)
         positions   = adapter.get_positions()
         history     = adapter.get_portfolio_history("1M")
-        realized_pl = adapter.get_realized_pl()
         return {
             "equity":      equity,
             "mode":        "Paper" if paper else "Live",

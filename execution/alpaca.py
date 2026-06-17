@@ -27,10 +27,6 @@ class AlpacaAdapter(BrokerAdapter):
         account = self._client.get_account()
         return float(account.equity)
 
-    def get_realized_pl(self) -> float:
-        account = self._client.get_account()
-        return float(account.realized_pl or 0.0)
-
     def get_positions(self) -> dict[str, Position]:
         raw = self._client.get_all_positions()
         out: dict[str, Position] = {}
