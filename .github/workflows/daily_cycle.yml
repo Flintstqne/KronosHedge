@@ -44,6 +44,22 @@ jobs:
           if [ -f vendor/sy_kronos/requirements.txt ]; then
             uv pip install -r vendor/sy_kronos/requirements.txt
           fi
+          echo "=== vendor/sy_kronos contents ==="
+          ls vendor/sy_kronos/
+
+      - name: Smoke-test sy-kronos import
+        run: |
+          uv run python - <<'PY'
+          import sys, traceback
+          sys.path.insert(0, "vendor/sy_kronos")
+          print("sys.path[0]:", sys.path[0])
+          try:
+              from model import Kronos, KronosTokenizer, KronosPredictor
+              print("OK: sy-kronos imports succeeded")
+          except Exception:
+              print("FAILED: sy-kronos import error:")
+              traceback.print_exc()
+          PY
 
       - name: Run cycle (intraday mode)
         env:
