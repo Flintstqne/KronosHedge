@@ -164,6 +164,7 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
         model_size=kronos_cfg["model_size"],
         horizon=kronos_cfg["horizon"],
         device=kronos_cfg["device"],
+        model_source=kronos_cfg.get("model_source", "chronos"),
     )
 
     last_date = (target_date or date.today()).isoformat()

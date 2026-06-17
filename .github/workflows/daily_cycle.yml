@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Clone shiyu-coder Kronos backbone
+        run: git clone --depth=1 https://github.com/shiyu-coder/Kronos.git vendor/sy_kronos
+
       - name: Run cycle (intraday mode)
         env:
           ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}

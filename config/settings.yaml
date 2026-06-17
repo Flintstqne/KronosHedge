@@ -51,7 +51,8 @@ sector_filter:
   max_per_sector: 4        # keep at most 4 positions within any one sector
 
 kronos:
-  model_size: small       # mini | small | base | large
+  model_size: base        # mini | small | base | large
+  model_source: sy-kronos # "chronos" (Amazon) | "sy-kronos" (shiyu-coder financial-native)
   horizon: 5              # trading days ahead
   device: cpu             # cuda | cpu  (change to cuda if GPU available)
   batch_size: 16
