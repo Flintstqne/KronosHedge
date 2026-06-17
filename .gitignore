@@ -24,6 +24,7 @@ data/kronos_cache/
 logs/audit/*
 logs/*.csv
 logs/*.log
+logs/forward_sim.json
 !logs/audit/.gitkeep
 
 # Notebook outputs

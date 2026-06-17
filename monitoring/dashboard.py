@@ -108,7 +108,7 @@ def _fetch_alpaca_live() -> dict | None:
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 
 st.sidebar.title("Kronos Hedge")
-page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk"])
+page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim"])
 log_dir = st.sidebar.text_input("Audit log directory", value="./logs/audit")
 st.sidebar.button("Refresh")
 
@@ -143,7 +143,7 @@ logger = AuditLogger(log_dir=log_dir)
 records = logger.load_all()
 
 if not records:
-    if page not in ("Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk"):
+    if page not in ("Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim"):
         st.warning("No audit records found. Run `python scripts/seed_demo_data.py` to generate demo data.")
         st.stop()
     latest = {}
@@ -2250,3 +2250,248 @@ elif page == "Regime & Risk":
             _vc2.plotly_chart(_fig_vix, use_container_width=True)
         else:
             st.caption("VIX data unavailable.")
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PAGE: Forward Sim
+# ═════════════════════════════════════════════════════════════════════════════
+
+elif page == "Forward Sim":
+    import json as _fsjson
+    from datetime import date as _fsdate
+
+    st.title("Forward Simulation")
+    st.caption(
+        "21-day scenario using Kronos-base stochastic forecasts. "
+        "Scenario tool — not a prediction. Black-swan events will not appear."
+    )
+
+    _SIM_FILE = Path("logs/forward_sim.json")
+
+    # ── Run / load ────────────────────────────────────────────────────────────
+    _sim_col, _age_col = st.columns([1, 3])
+
+    def _load_sim() -> dict | None:
+        try:
+            return _fsjson.loads(_SIM_FILE.read_text())
+        except Exception:
+            return None
+
+    _sim = _load_sim()
+
+    with _sim_col:
+        if st.button("Run Simulation", help="Takes ~2 min — downloads model on first run"):
+            with st.spinner("Running 8-path forward simulation…"):
+                try:
+                    from data.forward_sim import run as _fs_run
+                    _sim = _fs_run()
+                    st.success("Done.")
+                except Exception as _fse:
+                    st.error(str(_fse))
+
+    if _sim is None:
+        st.info("No simulation yet. Click **Run Simulation** to generate a 21-day forecast.")
+        st.stop()
+
+    with _age_col:
+        _sim_date = _sim.get("simulation_date", "")
+        _n_paths  = _sim.get("n_paths", 1)
+        _horizon  = _sim.get("horizon_days", 21)
+        _weights  = _sim.get("weights", {})
+        st.caption(
+            f"Run: **{_sim_date}** &nbsp;·&nbsp; {_n_paths} paths &nbsp;·&nbsp; {_horizon} trading days ahead"
+        )
+
+    # ── Portfolio equity curve ────────────────────────────────────────────────
+    st.subheader("Simulated Portfolio Equity")
+
+    _pm  = _sim.get("portfolio_median", [])
+    _p10 = _sim.get("portfolio_p10", [])
+    _p90 = _sim.get("portfolio_p90", [])
+    _all_paths = _sim.get("portfolio_paths", [])
+    _base = 100_000.0
+
+    if _pm:
+        _dates = [r["date"] for r in _pm]
+        _med   = [r["equity"] for r in _pm]
+        _lo    = [r["equity"] for r in _p10]
+        _hi    = [r["equity"] for r in _p90]
+
+        _med_end  = _med[-1]
+        _exp_ret  = (_med_end / _base - 1) * 100
+        _prob_pos = (sum(1 for p in _all_paths if p[-1]["equity"] > _base)
+                     / len(_all_paths) * 100) if _all_paths else 0
+        _worst    = min(p[-1]["equity"] for p in _all_paths) if _all_paths else _base
+        _best     = max(p[-1]["equity"] for p in _all_paths) if _all_paths else _base
+
+        _em1, _em2, _em3, _em4 = st.columns(4)
+        _em1.metric("Median return", f"{_exp_ret:+.1f}%")
+        _em2.metric("Probability of gain", f"{_prob_pos:.0f}%")
+        _em3.metric("Best path", f"{(_best/_base-1)*100:+.1f}%")
+        _em4.metric("Worst path", f"{(_worst/_base-1)*100:+.1f}%")
+
+        _fig_eq = go.Figure()
+
+        # Confidence band
+        _fig_eq.add_trace(go.Scatter(
+            x=_dates + _dates[::-1],
+            y=_hi + _lo[::-1],
+            fill="toself", fillcolor="rgba(66,165,245,0.10)",
+            line=dict(color="rgba(0,0,0,0)"),
+            name="P10–P90", showlegend=True,
+        ))
+
+        # Individual paths (faint)
+        for _pp in _all_paths:
+            _fig_eq.add_trace(go.Scatter(
+                x=[r["date"] for r in _pp], y=[r["equity"] for r in _pp],
+                mode="lines", line=dict(color="rgba(66,165,245,0.18)", width=1),
+                showlegend=False,
+            ))
+
+        # Median
+        _fig_eq.add_trace(go.Scatter(
+            x=_dates, y=_med, mode="lines", name="Median",
+            line=dict(color=C_BLUE, width=2.5),
+        ))
+
+        _fig_eq.add_hline(y=_base, line_color="white", line_width=0.8,
+                          opacity=0.3, line_dash="dot")
+        _fig_eq.update_layout(
+            yaxis_title="Portfolio Value ($)", yaxis_tickprefix="$", yaxis_tickformat=",.0f",
+            template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+            margin=dict(t=20, b=20), height=340,
+            legend=dict(orientation="h", y=1.05),
+        )
+        st.plotly_chart(_fig_eq, use_container_width=True)
+
+    st.divider()
+
+    # ── Ticker candlestick ────────────────────────────────────────────────────
+    st.subheader("Ticker Forecast")
+
+    _fs_tickers = list(_sim.get("tickers", {}).keys())
+    if not _fs_tickers:
+        st.caption("No ticker data in simulation.")
+        st.stop()
+
+    _fs_sel = st.selectbox("Select ticker", _fs_tickers, key="fs_ticker")
+    _td     = _sim["tickers"][_fs_sel]
+    _real   = _td.get("real_candles", [])
+    _mcand  = _td.get("median", [])
+    _lc     = _td.get("last_real_close", 0.0)
+    _pe     = _mcand[-1]["close"] if _mcand else _lc
+    _pr     = (_pe / _lc - 1) * 100 if _lc else 0
+
+    _tk1, _tk2, _tk3 = st.columns(3)
+    _tk1.metric("Last real close", f"${_lc:.2f}")
+    _tk2.metric(f"Predicted D+{_horizon}", f"${_pe:.2f}",
+                delta=f"{_pr:+.1f}%",
+                delta_color="normal" if _pr >= 0 else "inverse")
+    _tk3.metric("Portfolio weight", f"{_weights.get(_fs_sel, 0):.1%}" if _weights.get(_fs_sel) else "—")
+
+    _fig_c = go.Figure()
+
+    # Real candles
+    if _real:
+        _fig_c.add_trace(go.Candlestick(
+            x=[r["date"] for r in _real],
+            open=[r["open"]  for r in _real],
+            high=[r["high"]  for r in _real],
+            low=[r["low"]   for r in _real],
+            close=[r["close"] for r in _real],
+            name="Real",
+            increasing_line_color=C_BULL,
+            decreasing_line_color=C_BEAR,
+        ))
+
+    # Individual predicted paths as faint lines
+    for _pp in _td.get("paths", []):
+        _fig_c.add_trace(go.Scatter(
+            x=[c["date"] for c in _pp], y=[c["close"] for c in _pp],
+            mode="lines", line=dict(color="rgba(66,165,245,0.2)", width=1),
+            showlegend=False,
+        ))
+
+    # Median predicted candles
+    if _mcand:
+        _fig_c.add_trace(go.Candlestick(
+            x=[r["date"] for r in _mcand],
+            open=[r["open"]  for r in _mcand],
+            high=[r["high"]  for r in _mcand],
+            low=[r["low"]   for r in _mcand],
+            close=[r["close"] for r in _mcand],
+            name="Predicted (median)",
+            increasing_line_color="#42a5f5",
+            decreasing_line_color="#7e57c2",
+        ))
+
+    _fig_c.add_vline(x=_sim_date, line_color=C_GOLD, line_dash="dot", line_width=1.5)
+    _fig_c.add_annotation(
+        x=_sim_date, y=1.01, yref="paper",
+        text="Sim date", font=dict(color=C_GOLD, size=11),
+        showarrow=False,
+    )
+    _fig_c.update_layout(
+        template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+        margin=dict(t=20, b=20), height=440,
+        xaxis_rangeslider_visible=False,
+        legend=dict(orientation="h", y=1.05),
+    )
+    st.plotly_chart(_fig_c, use_container_width=True)
+
+    st.divider()
+
+    # ── Actual vs Predicted tracking ──────────────────────────────────────────
+    st.subheader("Actual vs Predicted")
+    st.caption("Fills in real closes as each forecast day passes. Green = model over-predicted, red = under-predicted.")
+
+    _pred_dates  = [c["date"] for c in _mcand]
+    _today_str   = str(_fsdate.today())
+    _passed      = [d for d in _pred_dates if d <= _today_str]
+
+    if not _passed:
+        st.caption("No forecast days have elapsed yet — check back after the first trading day.")
+    else:
+        @st.cache_data(ttl=900)
+        def _fetch_actuals_fwd(ticker: str, start: str) -> dict[str, float]:
+            try:
+                _raw = yf.download(ticker, start=start,
+                                   end=str(_fsdate.today()), progress=False, auto_adjust=True)
+                _s = _raw["Close"].squeeze().dropna()
+                return {str(dt.date()): float(v) for dt, v in _s.items()}
+            except Exception:
+                return {}
+
+        _actuals = _fetch_actuals_fwd(_fs_sel, _passed[0])
+        _track_rows = []
+        for _pday in _pred_dates:
+            _pc = next((c["close"] for c in _mcand if c["date"] == _pday), None)
+            _ac = _actuals.get(_pday)
+            if _pc and _ac:
+                _d  = _ac - _pc
+                _dp = (_ac / _pc - 1) * 100
+                _track_rows.append({
+                    "Date": _pday, "Predicted ($)": round(_pc, 2),
+                    "Actual ($)": round(_ac, 2),
+                    "Δ ($)": round(_d, 2), "Δ (%)": round(_dp, 2),
+                    "Status": "✓ elapsed",
+                })
+            elif _pc and _pday > _today_str:
+                _track_rows.append({
+                    "Date": _pday, "Predicted ($)": round(_pc, 2),
+                    "Actual ($)": "—", "Δ ($)": "—", "Δ (%)": "—",
+                    "Status": "pending",
+                })
+
+        if _track_rows:
+            _tr_df = pd.DataFrame(_track_rows)
+
+            def _color_delta(val) -> str:
+                if not isinstance(val, (int, float)):
+                    return ""
+                return f"color: {C_BEAR}; font-weight:600" if val < 0 else f"color: {C_BULL}; font-weight:600"
+
+            st.dataframe(
+                _tr_df.style.map(_color_delta, subset=["Δ ($)", "Δ (%)"]),
+                use_container_width=True, hide_index=True,
+            )
