@@ -96,6 +96,9 @@ class KronosSignalBridge:
         if self._predictor is not None:
             return
         if self.model_source == "sy-kronos":
+            vendor = Path(_VENDOR_PATH)
+            if not vendor.exists():
+                print(f"[kronos] vendor path missing: {_VENDOR_PATH}", flush=True)
             try:
                 self._predictor = _SyKronosPredictor(
                     model_size=self.model_size, device=self.device
@@ -106,6 +109,8 @@ class KronosSignalBridge:
                 )
                 return
             except Exception as e:
+                import traceback
+                print(f"[kronos] sy-kronos load failed:\n{traceback.format_exc()}", flush=True)
                 warnings.warn(f"sy-kronos load failed ({e}), falling back to Chronos.", stacklevel=2)
         # Default: Amazon Chronos
         try:

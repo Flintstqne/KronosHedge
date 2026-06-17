@@ -39,6 +39,12 @@ jobs:
       - name: Clone shiyu-coder Kronos backbone
         run: git clone --depth=1 https://github.com/shiyu-coder/Kronos.git vendor/sy_kronos
 
+      - name: Install Kronos vendor dependencies
+        run: |
+          if [ -f vendor/sy_kronos/requirements.txt ]; then
+            uv pip install -r vendor/sy_kronos/requirements.txt
+          fi
+
       - name: Run cycle (intraday mode)
         env:
           ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
