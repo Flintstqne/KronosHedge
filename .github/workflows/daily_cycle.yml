@@ -112,7 +112,8 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add logs/audit/ logs/forward_sim.json
+          git add logs/audit/ 2>/dev/null || true
+          [ -f logs/forward_sim.json ] && git add logs/forward_sim.json || true
           git diff --cached --quiet || git commit -m "chore: daily audit log $(date -u +%Y-%m-%d) [skip ci]"
           git push
 
