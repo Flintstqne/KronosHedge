@@ -1117,7 +1117,8 @@ elif page == "Backtest":
         results = None
         with st.spinner("Running backtest... this takes a few minutes."):
             try:
-                bt = Backtester(
+                import inspect as _inspect
+                _bt_kwargs = dict(
                     tickers=cfg["universe"]["tickers"],
                     start_date=bt_start,
                     end_date=bt_end,
@@ -1143,6 +1144,9 @@ elif page == "Backtest":
                     spy_reserve=bt_spy_reserve,
                     top_n=bt_top_n,
                 )
+                _bt_valid = set(_inspect.signature(Backtester).parameters)
+                _bt_kwargs = {k: v for k, v in _bt_kwargs.items() if k in _bt_valid}
+                bt = Backtester(**_bt_kwargs)
                 results = bt.run()
                 stats_bt = bt.summary()
                 Path("logs").mkdir(exist_ok=True)
