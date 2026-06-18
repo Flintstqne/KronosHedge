@@ -2,49 +2,37 @@ universe:
   source: custom_list
   max_tickers: 31
   tickers:
-    # Technology (6)
-    - AAPL
-    - MSFT
-    - NVDA
-    - GOOGL
-    - META
-    - AVGO
-    # Consumer Discretionary (4)
-    - AMZN
-    - TSLA
-    - HD
-    - MCD
-    # Healthcare (4)
-    - UNH
-    - LLY
-    - JNJ
-    - ABBV
-    # Financials (4)
-    - JPM
-    - V
-    - MA
-    - GS
-    # Energy (2)
-    - XOM
-    - CVX
-    # Industrials (3)
-    - CAT
-    - RTX
-    - HON
-    # Consumer Staples (3)
-    - COST
-    - WMT
-    - PG
-    # Communication Services (2)
-    - NFLX
-    - T
-    # Materials (1)
-    - LIN
-    # Utilities (1)
-    - NEE
-    # ETF
-    - SPCX
-
+  - AAPL
+  - ABBV
+  - AMZN
+  - AVGO
+  - CAT
+  - COST
+  - CVX
+  - GOOGL
+  - GS
+  - HD
+  - HON
+  - JNJ
+  - JPM
+  - LIN
+  - LLY
+  - MA
+  - MCD
+  - META
+  - MSFT
+  - NEE
+  - NFLX
+  - NVDA
+  - PG
+  - RTX
+  - SPCX
+  - T
+  - TSLA
+  - UNH
+  - V
+  - WMT
+  - XOM
 sector_map:
   AAPL: Technology
   MSFT: Technology
@@ -77,85 +65,74 @@ sector_map:
   LIN: Materials
   NEE: Utilities
   SPCX: ETF
-
 sector_filter:
   enabled: true
-  max_sector_pct: 0.40     # no single sector > 40% of the portfolio
-  max_per_sector: 4        # keep at most 4 positions within any one sector
-
+  max_sector_pct: 0.4
+  max_per_sector: 4
 kronos:
-  model_size: base        # mini | small | base | large
-  model_source: sy-kronos # "chronos" (Amazon) | "sy-kronos" (shiyu-coder financial-native)
-  horizon: 5              # trading days ahead
-  device: cpu             # cuda | cpu  (change to cuda if GPU available)
+  model_size: base
+  model_source: sy-kronos
+  horizon: 5
+  device: cpu
   batch_size: 16
-  lookback_days: 60       # historical candles fed to Kronos
-
+  lookback_days: 60
 agents:
   llm_provider: anthropic
   llm_model: claude-sonnet-4-6
   max_concurrent: 4
   enabled:
-    - technicals
-    - valuation
-    - sentiment
-    - fundamentals
-    - risk_manager
-    - portfolio_manager
-    - warren_buffett
-    - peter_lynch
-    - charlie_munger
-    - benjamin_graham
-    - george_soros
-
+  - technicals
+  - valuation
+  - sentiment
+  - fundamentals
+  - risk_manager
+  - portfolio_manager
+  - warren_buffett
+  - peter_lynch
+  - charlie_munger
+  - benjamin_graham
+  - george_soros
 alpha:
-  momentum_blend: 0.80   # fraction of score from 12M-1M cross-sectional momentum vs Kronos
-  top_n: 10              # hold only the top N ranked stocks
-  short_n: 3             # short bottom-N momentum stocks (0 = disabled)
-  pead_boost: 0.20       # score additive for recent EPS beaters
-
+  momentum_blend: 0.8
+  top_n: 10
+  short_n: 3
+  pead_boost: 0.2
 risk:
-  trailing_stop: 0.07        # floor for vol-scaled stop (3σ√5, clipped to this minimum)
-  drawdown_stop: 0.07        # circuit breaker fires when portfolio is this far below peak
-  recovery_threshold: 0.02   # circuit breaker releases when within this % of peak
-  cash_reserve_pct: 0.30     # fraction redirected when circuit breaker is active
-  spy_reserve: true          # park the reserve in SPY instead of idle cash
-  vix_threshold: 25          # scale all weights by (threshold/vix) when VIX exceeds this
-  stop_cooldown_days: 2      # rebalance days to block re-entry after a trailing stop fires
-
+  trailing_stop: 0.07
+  drawdown_stop: 0.07
+  recovery_threshold: 0.02
+  cash_reserve_pct: 0.25
+  spy_reserve: true
+  vix_threshold: 25
+  stop_cooldown_days: 2
 reconciliation:
-  qlib_weight: 0.60
-  agent_weight: 0.40
-
+  qlib_weight: 0.6
+  agent_weight: 0.4
 execution:
   broker: alpaca
   paper: true
   max_position_pct: 0.05
   min_order_usd: 100
   twap_intervals: 5
-  intraday_signal_time: "10:00"    # ET — compute signals after opening noise settles
-  intraday_execution_delay: 15     # minutes after signal time to execute
-
+  intraday_signal_time: '10:00'
+  intraday_execution_delay: 15
 regime:
   enabled: true
-  yield_curve_threshold: -0.5      # 10Y-3M spread below this % = bearish signal
-  hyg_momentum_threshold: -0.02   # HYG >2% below 20d SMA = credit stress signal
-  spy_trend_threshold: -0.05       # SPY >5% below 200d SMA = bear market signal
-  transition_scale: 0.80           # weight multiplier in transition regime
-  risk_off_scale: 0.50             # weight multiplier in risk_off regime
-
+  yield_curve_threshold: -0.5
+  hyg_momentum_threshold: -0.02
+  spy_trend_threshold: -0.05
+  transition_scale: 0.8
+  risk_off_scale: 0.5
 forward_sim:
   n_paths: 64
   horizon: 21
-
 monitoring:
   audit_log_path: ./logs/audit
   dashboard_port: 8501
   alert_drawdown_threshold: -0.05
   benchmark_ticker: SPY
-
 qlib:
   freq: day
-  start_date: "2020-01-01"
-  fit_start_date: "2020-01-01"
-  fit_end_date: "2023-12-31"
+  start_date: '2020-01-01'
+  fit_start_date: '2020-01-01'
+  fit_end_date: '2023-12-31'
