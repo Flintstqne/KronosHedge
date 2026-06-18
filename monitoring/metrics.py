@@ -163,6 +163,80 @@ class PerformanceMetrics:
             .reset_index(name="count")
         )
 
+    # ── Signal attribution ────────────────────────────────────────────────────
+
+    def signal_attribution(self) -> pd.DataFrame:
+        """
+        Per-agent P&L attribution: how much of the portfolio's realized return
+        was driven by each signal source.
+
+        For each consecutive run pair, actual ticker return = (close[i+1]-close[i])/close[i].
+        Each agent's contribution = final_weight[ticker] * actual_return * vote_direction,
+        where vote_direction is +1 (bullish), -1 (bearish), 0 (neutral).
+        """
+        _vote = {"bullish": 1, "bearish": -1, "neutral": 0}
+        agent_types = [
+            "technical_signals", "fundamental_signals",
+            "sentiment_signals", "valuation_signals", "news_sentiment_signals",
+        ]
+
+        rows = []
+        for i in range(len(self._records) - 1):
+            curr = self._records[i]
+            nxt  = self._records[i + 1]
+            weights = curr.get("final_weights", {})
+
+            # compute actual returns from kronos last_close
+            actual_ret: dict[str, float] = {}
+            for ticker in weights:
+                curr_sig = curr.get("kronos_signals", {}).get(ticker, {})
+                nxt_sig  = nxt.get("kronos_signals",  {}).get(ticker, {})
+                c0 = curr_sig.get("last_close") if isinstance(curr_sig, dict) else None
+                c1 = nxt_sig.get("last_close")  if isinstance(nxt_sig,  dict) else None
+                if c0 and c1 and c0 > 0:
+                    actual_ret[ticker] = (c1 - c0) / c0
+
+            for ticker, wt in weights.items():
+                ret = actual_ret.get(ticker)
+                if ret is None:
+                    continue
+                # standard signal agents
+                for atype in agent_types:
+                    sig = curr.get(atype, {}).get(ticker)
+                    if isinstance(sig, dict):
+                        direction = _vote.get(sig.get("signal", "neutral"), 0)
+                        rows.append({
+                            "timestamp": curr["timestamp"],
+                            "agent": atype.replace("_signals", ""),
+                            "ticker": ticker,
+                            "weight": wt,
+                            "actual_return": ret,
+                            "attributed_return": wt * ret * direction,
+                        })
+                # investor bots
+                for investor, sig in curr.get("investor_signals", {}).get(ticker, {}).items():
+                    if isinstance(sig, dict):
+                        direction = _vote.get(sig.get("signal", "neutral"), 0)
+                        rows.append({
+                            "timestamp": curr["timestamp"],
+                            "agent": investor,
+                            "ticker": ticker,
+                            "weight": wt,
+                            "actual_return": ret,
+                            "attributed_return": wt * ret * direction,
+                        })
+
+        if not rows:
+            return pd.DataFrame(columns=["agent", "ticker", "attributed_return"])
+
+        df = pd.DataFrame(rows)
+        return (
+            df.groupby("agent")["attributed_return"]
+            .sum()
+            .reset_index()
+            .sort_values("attributed_return", ascending=False)
+        )
+
     # ── Order history ─────────────────────────────────────────────────────────
 
     def order_history(self) -> pd.DataFrame:

@@ -25,6 +25,7 @@ logs/*.csv
 logs/*.log
 logs/options_data.json
 logs/insider_data.json
+logs/short_interest.json
 logs/stress_test.json
 
 # Notebook outputs

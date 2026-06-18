@@ -223,9 +223,10 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
              vix=round(vix, 1),
              pead_beaters=list(pead_signals.keys()))
 
-    # ── 3b. Load options + insider data (collected by Actions alongside main run) ─
+    # ── 3b. Load options / insider / short-interest data ─────────────────────
     from data.options_collector import OPT_PATH
     from data.insider import INSIDER_PATH
+    from data.short_interest import SHORT_PATH
     try:
         options_data = json.loads(OPT_PATH.read_text()).get("tickers", {}) if OPT_PATH.exists() else {}
     except Exception:
@@ -234,7 +235,12 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
         insider_data = json.loads(INSIDER_PATH.read_text()).get("transactions", []) if INSIDER_PATH.exists() else []
     except Exception:
         insider_data = []
-    log.info("alt_data_loaded", options_tickers=len(options_data), insider_filings=len(insider_data))
+    try:
+        short_interest = json.loads(SHORT_PATH.read_text()).get("tickers", {}) if SHORT_PATH.exists() else {}
+    except Exception:
+        short_interest = {}
+    log.info("alt_data_loaded", options_tickers=len(options_data),
+             insider_filings=len(insider_data), short_tickers=len(short_interest))
 
     # ── 3c. Qlib alpha + Agent pipeline ──────────────────────────────────────
     # Build 60-day vol window and 273-day momentum window from the long fetch.
@@ -266,6 +272,7 @@ def run_cycle(cfg: dict, target_date: date | None = None, dry_run: bool = False,
         news_context=news_context,
         options_data=options_data,
         insider_data=insider_data,
+        short_interest=short_interest,
     )
     log.info("agents_done")
 

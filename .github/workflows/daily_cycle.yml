@@ -103,6 +103,10 @@ jobs:
         if: always()
         run: uv run python data/insider.py
 
+      - name: Collect short interest data
+        if: always()
+        run: uv run python data/short_interest.py
+
       - name: Commit audit log to repo
         if: always()
         run: |
@@ -128,4 +132,5 @@ jobs:
           path: |
             logs/options_data.json
             logs/insider_data.json
+            logs/short_interest.json
           retention-days: 30

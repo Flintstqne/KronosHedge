@@ -28,6 +28,7 @@ class AgentState(TypedDict, total=False):
     news_context: dict                    # injected by run_agent_pipeline
     options_data: dict[str, dict]         # {ticker: {iv_30d, iv_rank, pcr, ...}}
     insider_data: list[dict]              # [{ticker, filed, url}, ...]
+    short_interest: dict[str, dict]       # {ticker: {short_pct_float, days_to_cover, ...}}
     # Outputs filled stage by stage
     technical_signals: dict[str, dict]
     investor_signals: dict[str, dict[str, dict]]
@@ -60,6 +61,7 @@ def run_agent_pipeline(
     news_context: dict | None = None,
     options_data: dict[str, dict] | None = None,
     insider_data: list[dict] | None = None,
+    short_interest: dict[str, dict] | None = None,
 ) -> AgentState:
     state: AgentState = {
         "tickers": list(kronos_signals.keys()),
@@ -71,6 +73,7 @@ def run_agent_pipeline(
         "news_context": news_context or {},
         "options_data": options_data or {},
         "insider_data": insider_data or [],
+        "short_interest": short_interest or {},
     }
     import structlog as _sl
     _log = _sl.get_logger()

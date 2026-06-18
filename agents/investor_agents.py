@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from kronos_bridge import render_for_llm, ForecastSignal
 from .llm import get_llm
-from .fundamentals import _format_options, _format_insider
+from .fundamentals import _format_options, _format_insider, _format_short_interest
 
 INVESTOR_PERSONAS = {
     "warren_buffett": (
@@ -50,9 +50,10 @@ def _run_investor(
     llm: Any,
     options_ctx: str = "",
     insider_ctx: str = "",
+    short_ctx: str = "",
 ) -> dict:
     context = render_for_llm(forecast)
-    extra = "\n".join(filter(None, [options_ctx, insider_ctx]))
+    extra = "\n".join(filter(None, [options_ctx, insider_ctx, short_ctx]))
     body = f"{context}\n{extra}\n\nWhat is your signal for {ticker}?" if extra else f"{context}\n\nWhat is your signal for {ticker}?"
     response = llm.invoke([
         SystemMessage(content=f"{persona}\n\nOutput JSON only: {SIGNAL_SCHEMA}"),
@@ -70,8 +71,9 @@ def investor_agents(state: dict[str, Any]) -> dict[str, Any]:
         model=state.get("llm_model", "claude-sonnet-4-6"),
     )
     kronos_signals: dict[str, ForecastSignal] = state["kronos_signals"]
-    options_data = state.get("options_data", {})
-    insider_data = state.get("insider_data", [])
+    options_data   = state.get("options_data", {})
+    insider_data   = state.get("insider_data", [])
+    short_interest = state.get("short_interest", {})
     enabled: list[str] = [
         k for k in state.get("enabled_agents", list(INVESTOR_PERSONAS.keys()))
         if k in INVESTOR_PERSONAS
@@ -82,11 +84,12 @@ def investor_agents(state: dict[str, Any]) -> dict[str, Any]:
     for ticker, forecast in kronos_signals.items():
         options_ctx = _format_options(ticker, options_data)
         insider_ctx = _format_insider(ticker, insider_data)
+        short_ctx   = _format_short_interest(ticker, short_interest)
         investor_signals[ticker] = {}
         for name in enabled:
             investor_signals[ticker][name] = _run_investor(
                 name, INVESTOR_PERSONAS[name], ticker, forecast, llm,
-                options_ctx=options_ctx, insider_ctx=insider_ctx,
+                options_ctx=options_ctx, insider_ctx=insider_ctx, short_ctx=short_ctx,
             )
 
     return {**state, "investor_signals": investor_signals}

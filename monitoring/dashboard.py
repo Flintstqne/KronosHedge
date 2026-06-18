@@ -116,15 +116,39 @@ st.sidebar.button("Refresh")
 _alpaca = _fetch_alpaca_live()
 if _alpaca and "error" not in _alpaca:
     st.sidebar.divider()
+    _sb_positions = _alpaca["positions"]
+    _sb_equity    = _alpaca["equity"]
+    _sb_upl       = sum(float(p.unrealized_pl) for p in _sb_positions.values())
+    _sb_mv        = sum(float(p.market_value)  for p in _sb_positions.values())
+    _sb_cash      = _sb_equity - _sb_mv
+    _sb_cash_pct  = _sb_cash / _sb_equity * 100 if _sb_equity else 0
+
     mode_color = "#ffa726" if _alpaca["mode"] == "Paper" else "#ef5350"
     st.sidebar.markdown(
         f'<span style="background:{mode_color};color:white;padding:2px 8px;'
         f'border-radius:4px;font-size:12px;font-weight:700">{_alpaca["mode"]}</span>',
         unsafe_allow_html=True,
     )
-    st.sidebar.metric("Account equity", f"${_alpaca['equity']:,.2f}")
-    n_pos = len(_alpaca["positions"])
+    st.sidebar.metric("Account equity", f"${_sb_equity:,.2f}")
+    _upl_delta_color = "normal" if _sb_upl >= 0 else "inverse"
+    st.sidebar.metric("Unrealised P&L", f"${_sb_upl:+,.2f}", delta_color=_upl_delta_color)
+    st.sidebar.metric("Cash", f"${_sb_cash:,.0f}", delta=f"{_sb_cash_pct:.0f}%", delta_color="off")
+    n_pos = len(_sb_positions)
     st.sidebar.caption(f"{n_pos} open position{'s' if n_pos != 1 else ''}")
+
+    # Regime badge from risk_state.json
+    try:
+        _sb_rs = json.loads(Path("data/risk_state.json").read_text())
+        _sb_reg = _sb_rs.get("last_regime", "")
+        if _sb_reg:
+            _sb_reg_color = {"risk_on": "#26a69a", "transition": "#ffa726", "risk_off": "#ef5350"}.get(_sb_reg, "#888")
+            st.sidebar.markdown(
+                f'<div style="margin-top:4px"><span style="color:{_sb_reg_color};font-weight:700;font-size:12px">'
+                f'● {_sb_reg.replace("_", " ").upper()}</span></div>',
+                unsafe_allow_html=True,
+            )
+    except Exception:
+        pass
 elif _alpaca and "error" in _alpaca:
     st.sidebar.warning(f"Alpaca: {_alpaca['error'][:80]}")
 else:
@@ -1067,6 +1091,11 @@ elif page == "Backtest":
                 min_value=0.1, max_value=2.0, value=0.5, step=0.1,
                 help="Only rebalance if position change exceeds this threshold. Reduces churn.",
             ) / 100.0
+            bt_slippage = st.slider(
+                "Slippage (bps per side)",
+                min_value=0, max_value=30, value=5, step=1,
+                help="Simulated bid-ask slippage applied at each fill. 5 bps = typical liquid large-cap spread.",
+            )
 
     bt_range_days = (bt_end - bt_start).days
     if bt_range_days < 5:
@@ -1108,6 +1137,7 @@ elif page == "Backtest":
                     cash_reserve_pct=bt_cash_res,
                     min_trade_pct=bt_min_trade,
                     trailing_stop=bt_trailing_stop,
+                    slippage_bps=float(bt_slippage),
                     momentum_blend=bt_momentum_blend,
                     rebalance_frequency=bt_rebalance_freq,
                     spy_reserve=bt_spy_reserve,
@@ -1893,6 +1923,23 @@ elif page == "Portfolio":
         st.warning("Alpaca not connected. Set ALPACA_API_KEY to see live positions.")
         st.stop()
 
+    # ── Auto-refresh during market hours ──────────────────────────────────────
+    try:
+        from data.intraday import market_is_open as _mio
+        _is_open = _mio()
+    except Exception:
+        _is_open = False
+    _refresh_placeholder = st.empty()
+    if _is_open:
+        _refresh_placeholder.caption("Market open — auto-refreshing every 30s.")
+    else:
+        _refresh_placeholder.caption("Market closed. Click ↺ to refresh manually.")
+    _col_ref1, _col_ref2 = st.columns([8, 1])
+    with _col_ref2:
+        if st.button("↺", help="Refresh positions now"):
+            st.cache_data.clear()
+            st.rerun()
+
     _positions = _alpaca.get("positions", {})
     _equity    = _alpaca.get("equity", 0.0)
     _history   = _alpaca.get("history")
@@ -1946,6 +1993,15 @@ elif page == "Portfolio":
     st.subheader(f"Open Positions ({len(_positions)})")
 
     if _positions:
+        # Signal traffic-light per ticker from latest audit record
+        def _signal_light(ticker: str) -> str:
+            if not latest:
+                return "—"
+            c = _consensus(ticker, latest)
+            total = c["total"] or 1
+            net = (c["bullish"] - c["bearish"]) / total
+            return "🟢 Bullish" if net > 0.2 else ("🔴 Bearish" if net < -0.2 else "⚪ Neutral")
+
         _pos_rows = []
         for _sym, _p in sorted(_positions.items()):
             _mv   = float(_p.market_value)
@@ -1957,6 +2013,7 @@ elif page == "Portfolio":
             _uplpct = (_cur / _avg - 1) * 100 if _avg else 0.0
             _side = "SHORT" if _qty < 0 else "LONG"
             _pos_rows.append({
+                "Signal":          _signal_light(_sym),
                 "Ticker":          _sym,
                 "Side":            _side,
                 "Qty":             round(_qty, 4),
@@ -1988,6 +2045,112 @@ elif page == "Portfolio":
                 }),
             use_container_width=True, hide_index=True,
         )
+
+        # ── Close Position ────────────────────────────────────────────────────
+        with st.expander("Close a Position"):
+            _close_sym = st.selectbox("Select position", sorted(_positions.keys()), key="pf_close_sym")
+            _close_qty = float(_positions[_close_sym].qty) if _close_sym else 0
+            _close_mv  = float(_positions[_close_sym].market_value) if _close_sym else 0
+            st.caption(f"Current: {_close_qty:+.4f} shares  ·  market value ${_close_mv:,.2f}")
+            _close_confirm = st.checkbox(
+                f"Yes, close the entire {_close_sym} position at market price", key="pf_close_confirm"
+            )
+            if st.button("Close Position", type="secondary", disabled=not _close_confirm, key="pf_close_btn"):
+                try:
+                    from execution.alpaca import AlpacaAdapter as _CloseAdapter
+                    _close_paper = os.getenv("ALPACA_PAPER", "true").lower() != "false"
+                    _close_adp = _CloseAdapter(paper=_close_paper)
+                    _close_adp.close_position(_close_sym)
+                    st.success(f"Closed {_close_sym}.")
+                    st.cache_data.clear()
+                    st.rerun()
+                except Exception as _ce:
+                    st.error(f"Close failed: {_ce}")
+
+        # ── Agent Consensus Radar ─────────────────────────────────────────────
+        if latest:
+            st.subheader("Agent Consensus")
+            _radar_sym = st.selectbox("Ticker", sorted(_positions.keys()), key="pf_radar_sym")
+            _radar_agents = {
+                "technical":    latest.get("technical_signals", {}).get(_radar_sym, {}),
+                "fundamental":  latest.get("fundamental_signals", {}).get(_radar_sym, {}),
+                "sentiment":    latest.get("sentiment_signals", {}).get(_radar_sym, {}),
+                "valuation":    latest.get("valuation_signals", {}).get(_radar_sym, {}),
+                "news":         latest.get("news_sentiment_signals", {}).get(_radar_sym, {}),
+            }
+            for _inv, _sig in (latest.get("investor_signals", {}).get(_radar_sym) or {}).items():
+                _radar_agents[_inv] = _sig
+
+            _vote_map = {"bullish": 1, "neutral": 0, "bearish": -1}
+            _radar_labels, _radar_vals = [], []
+            for _ag, _sig in _radar_agents.items():
+                if isinstance(_sig, dict):
+                    _v = _vote_map.get(_sig.get("signal", "neutral"), 0)
+                    _conf = _sig.get("confidence", 50) / 100
+                    _radar_labels.append(_ag)
+                    _radar_vals.append(_v * _conf)   # [-1, 1] weighted by confidence
+
+            if _radar_labels:
+                _radar_labels_closed = _radar_labels + [_radar_labels[0]]
+                _radar_vals_closed   = _radar_vals   + [_radar_vals[0]]
+                _fig_radar = go.Figure(go.Scatterpolar(
+                    r=_radar_vals_closed, theta=_radar_labels_closed,
+                    fill="toself",
+                    line=dict(color="#26a69a"),
+                    fillcolor="rgba(38,166,154,0.15)",
+                ))
+                _fig_radar.update_layout(
+                    polar=dict(
+                        radialaxis=dict(range=[-1, 1], tickvals=[-1, -0.5, 0, 0.5, 1],
+                                        ticktext=["Bear", "", "Neutral", "", "Bull"],
+                                        gridcolor="#333"),
+                        angularaxis=dict(gridcolor="#333"),
+                        bgcolor="#0e1117",
+                    ),
+                    template="plotly_dark", paper_bgcolor="#0e1117",
+                    margin=dict(t=20, b=20), height=340,
+                )
+                st.plotly_chart(_fig_radar, use_container_width=True)
+                st.caption("Spoke length = confidence-weighted signal. Positive = bullish.")
+
+        # ── What-If Simulator ─────────────────────────────────────────────────
+        with st.expander("What-If Position Sizer"):
+            st.caption(
+                "Adjust hypothetical weights and see projected P&L based on each position's "
+                "current return vs entry. Weights are for illustration only — no orders are placed."
+            )
+            _wi_tickers = sorted(_positions.keys())
+            _wi_default = {
+                r["Ticker"]: round(r["Weight %"] / 100, 3) for r in _pos_rows
+            }
+            _wi_cols = st.columns(min(len(_wi_tickers), 4))
+            _wi_weights: dict[str, float] = {}
+            for _wi_i, _wi_t in enumerate(_wi_tickers):
+                with _wi_cols[_wi_i % len(_wi_cols)]:
+                    _wi_weights[_wi_t] = st.slider(
+                        _wi_t, 0.0, 0.40,
+                        float(_wi_default.get(_wi_t, 0.05)),
+                        0.01, key=f"wi_{_wi_t}",
+                        format="%.0f%%",
+                    )
+            _wi_total = sum(_wi_weights.values())
+            st.caption(f"Total weight: {_wi_total:.0%}  {'⚠️ exceeds 100%' if _wi_total > 1.0 else ''}")
+            _wi_proj_pnl = 0.0
+            _wi_rows = []
+            for _wi_t, _wi_w in _wi_weights.items():
+                _p = _positions.get(_wi_t)
+                if not _p:
+                    continue
+                _wi_ret = (float(_p.market_value) / float(_p.qty) / float(_p.avg_entry_price) - 1) if float(_p.qty) != 0 and float(_p.avg_entry_price) else 0
+                _wi_notional = _wi_w * _equity
+                _wi_pnl = _wi_notional * _wi_ret
+                _wi_proj_pnl += _wi_pnl
+                _wi_rows.append({"Ticker": _wi_t, "Weight": f"{_wi_w:.0%}", "Proj P&L": round(_wi_pnl, 2)})
+            if _wi_rows:
+                _wi_df = pd.DataFrame(_wi_rows)
+                _wi_df["Proj P&L"] = _wi_df["Proj P&L"].map(lambda v: f"${v:+,.2f}")
+                st.dataframe(_wi_df, use_container_width=True, hide_index=True)
+                st.metric("Total projected P&L at these weights", f"${_wi_proj_pnl:+,.2f}")
 
         # ── Weight breakdown pie ──────────────────────────────────────────────
         st.subheader("Weight Breakdown")
@@ -2083,8 +2246,79 @@ elif page == "Portfolio":
                     st.caption("IV Rank >70% = elevated vol (red). PCR >1.0 = put-heavy (bearish skew).")
             except Exception:
                 pass
+
+        # ── Short Interest ────────────────────────────────────────────────────
+        _si_path = Path("logs/short_interest.json")
+        if _si_path.exists():
+            try:
+                _si = json.loads(_si_path.read_text())
+                _si_date = _si.get("date", "")
+                st.subheader(f"Short Interest — {_si_date}")
+                _si_rows = []
+                for _sym in sorted(_si.get("tickers", {})):
+                    _sd = _si["tickers"][_sym]
+                    if "error" in _sd:
+                        continue
+                    _si_rows.append({
+                        "Ticker":         _sym,
+                        "Short % Float":  _sd.get("short_pct_float"),
+                        "Days to Cover":  _sd.get("days_to_cover"),
+                        "Shares Short":   _sd.get("shares_short"),
+                    })
+                if _si_rows:
+                    _si_df = pd.DataFrame(_si_rows)
+                    def _color_si(val):
+                        if val is None: return ""
+                        return f"color: {C_BEAR}; font-weight:600" if val > 0.20 else (
+                               f"color: {C_BEAR}" if val > 0.10 else "")
+                    st.dataframe(
+                        _si_df.style
+                            .map(_color_si, subset=["Short % Float"])
+                            .format({"Short % Float": "{:.1%}", "Days to Cover": "{:.1f}",
+                                     "Shares Short": "{:,.0f}"}, na_rep="—"),
+                        use_container_width=True, hide_index=True,
+                    )
+                    st.caption("Short float >20% = very high (red). Days to cover >5 = significant squeeze potential.")
+            except Exception:
+                pass
+
+        # ── Correlation Heatmap ───────────────────────────────────────────────
+        if len(_positions) >= 2:
+            try:
+                import yfinance as _yf
+                _hm_tickers = sorted(_positions.keys())
+                _hm_raw = _yf.download(_hm_tickers, period="30d", progress=False, auto_adjust=True)
+                _hm_close = (_hm_raw["Close"] if isinstance(_hm_raw.columns, pd.MultiIndex) else _hm_raw[["Close"]])
+                _hm_corr = _hm_close.pct_change().corr()
+                _hm_corr = _hm_corr.dropna(how="all").dropna(axis=1, how="all")
+                if not _hm_corr.empty and len(_hm_corr) >= 2:
+                    st.subheader("Return Correlation (30d)")
+                    _fig_hm = go.Figure(go.Heatmap(
+                        z=_hm_corr.values,
+                        x=list(_hm_corr.columns),
+                        y=list(_hm_corr.index),
+                        colorscale="RdYlGn",
+                        zmid=0, zmin=-1, zmax=1,
+                        text=_hm_corr.round(2).values,
+                        texttemplate="%{text:.2f}",
+                        showscale=True,
+                    ))
+                    _fig_hm.update_layout(
+                        template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                        margin=dict(t=10, b=10), height=max(300, len(_hm_corr) * 50),
+                    )
+                    st.plotly_chart(_fig_hm, use_container_width=True)
+                    st.caption("Pairs near 1.0 move together — review for concentration risk.")
+            except Exception:
+                pass
     else:
         st.info("No open positions. The portfolio is fully in cash.")
+
+    # ── Auto-rerun during market hours ────────────────────────────────────────
+    if _is_open:
+        import time as _time
+        _time.sleep(30)
+        st.rerun()
 
 # ═════════════════════════════════════════════════════════════════════════════
 # PAGE: Trade Log
@@ -2214,8 +2448,73 @@ elif page == "Trade Log":
     )
     st.plotly_chart(_fig_act, use_container_width=True)
 
-    # ── Signal Attribution ────────────────────────────────────────────────────
-    st.subheader("Signal Attribution")
+    # ── Activity calendar heatmap ─────────────────────────────────────────────
+    st.subheader("Trade Activity Calendar")
+    try:
+        _cal_df = _tlog.copy()
+        _cal_df["date_dt"] = pd.to_datetime(_cal_df["Date"], errors="coerce")
+        _cal_df = _cal_df.dropna(subset=["date_dt"])
+        if not _cal_df.empty:
+            _cal_counts = _cal_df.groupby("date_dt").size().reset_index(name="trades")
+            _cal_counts["week"]    = _cal_counts["date_dt"].dt.isocalendar().week.astype(int)
+            _cal_counts["year"]    = _cal_counts["date_dt"].dt.isocalendar().year.astype(int)
+            _cal_counts["weekday"] = _cal_counts["date_dt"].dt.weekday   # 0=Mon
+            _cal_counts["week_id"] = (_cal_counts["year"] - _cal_counts["year"].min()) * 53 + _cal_counts["week"]
+            _cal_pivot = _cal_counts.pivot_table(
+                index="weekday", columns="week_id", values="trades", fill_value=0
+            )
+            _wd_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+            _y_labels  = [_wd_labels[i] for i in _cal_pivot.index]
+            # Week labels along x-axis: first date of each week_id
+            _wk_map = _cal_counts.groupby("week_id")["date_dt"].min().dt.strftime("%b %d")
+            _x_labels = [_wk_map.get(c, "") for c in _cal_pivot.columns]
+            _fig_cal = go.Figure(go.Heatmap(
+                z=_cal_pivot.values,
+                x=_x_labels,
+                y=_y_labels,
+                colorscale=[[0, "#1a1a2e"], [0.01, "#0d3349"], [1, "#26a69a"]],
+                showscale=False,
+                text=_cal_pivot.values,
+                texttemplate="%{text}",
+                hovertemplate="Week of %{x}, %{y}: %{z} trades<extra></extra>",
+            ))
+            _fig_cal.update_layout(
+                template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+                margin=dict(t=10, b=10), height=180,
+                yaxis=dict(autorange="reversed"),
+            )
+            st.plotly_chart(_fig_cal, use_container_width=True)
+            st.caption("Each cell = number of orders placed that day. Brighter = more active.")
+    except Exception:
+        pass
+
+    # ── Agent P&L Attribution ─────────────────────────────────────────────────
+    st.subheader("Agent P&L Attribution")
+    _pnl_attr = metrics.signal_attribution()
+    if not _pnl_attr.empty:
+        st.caption("Cumulative attributed return per signal source across all logged runs. "
+                   "Positive = agent's votes aligned with actual price moves.")
+        _pnl_attr["attributed_return"] = _pnl_attr["attributed_return"].round(4)
+        _fig_pnl = go.Figure(go.Bar(
+            x=_pnl_attr["attributed_return"],
+            y=_pnl_attr["agent"],
+            orientation="h",
+            marker_color=[C_BULL if v >= 0 else C_BEAR for v in _pnl_attr["attributed_return"]],
+            text=[f"{v:+.2%}" for v in _pnl_attr["attributed_return"]],
+            textposition="outside",
+        ))
+        _fig_pnl.update_layout(
+            xaxis_tickformat=".1%",
+            template="plotly_dark", paper_bgcolor="#0e1117", plot_bgcolor="#0e1117",
+            margin=dict(t=10, b=10, l=160), height=max(200, len(_pnl_attr) * 36),
+            showlegend=False,
+        )
+        st.plotly_chart(_fig_pnl, use_container_width=True)
+    else:
+        st.info("Agent P&L attribution available after 2+ run cycles.")
+
+    # ── Alpha Factor Breakdown ────────────────────────────────────────────────
+    st.subheader("Alpha Factor Breakdown")
     _attr_recs = [r for r in records if r.get("signal_attribution")]
     if _attr_recs:
         _latest_attr = _attr_recs[-1]
@@ -2979,6 +3278,33 @@ elif page == "Settings":
             "Max positions per sector", 1, 10, int(_sf.get("max_per_sector", 4)), 1,
             help="Maximum number of individual positions within any one sector.",
         )
+
+    st.divider()
+
+    # ── Universe editor ───────────────────────────────────────────────────────
+    st.subheader("Ticker Universe")
+    _u = _cfg.get("universe", {})
+    _cur_tickers = _u.get("tickers", [])
+    _ticker_text = st.text_area(
+        "Tickers (one per line or comma-separated)",
+        value="\n".join(_cur_tickers),
+        height=180,
+        help="The strategy will trade exactly these tickers. Changes take effect on the next run cycle.",
+    )
+    _parsed_tickers = sorted({
+        t.strip().upper()
+        for t in _ticker_text.replace(",", "\n").split("\n")
+        if t.strip() and t.strip().isalpha()
+    })
+    _added_t   = set(_parsed_tickers) - set(_cur_tickers)
+    _removed_t = set(_cur_tickers)    - set(_parsed_tickers)
+    _tu1, _tu2 = st.columns(2)
+    if _added_t:
+        _tu1.success(f"Adding: {', '.join(sorted(_added_t))}")
+    if _removed_t:
+        _tu2.warning(f"Removing: {', '.join(sorted(_removed_t))}")
+    st.caption(f"{len(_parsed_tickers)} tickers in universe.")
+    _changed["universe.tickers"] = _parsed_tickers
 
     st.divider()
 

@@ -52,17 +52,33 @@ def _format_insider(ticker: str, insider_data: list) -> str:
     return f"Insider Form 4 filings (last 60d): {count} filing{'s' if count > 1 else ''}"
 
 
+def _format_short_interest(ticker: str, short_interest: dict) -> str:
+    d = short_interest.get(ticker, {})
+    if not d or "error" in d:
+        return ""
+    parts = []
+    if d.get("short_pct_float") is not None:
+        pct = d["short_pct_float"]
+        level = "very high" if pct > 0.20 else ("high" if pct > 0.10 else ("moderate" if pct > 0.05 else "low"))
+        parts.append(f"Short float: {pct:.1%} ({level})")
+    if d.get("days_to_cover") is not None:
+        parts.append(f"Days to cover: {d['days_to_cover']:.1f}")
+    return "Short interest: " + "  |  ".join(parts) if parts else ""
+
+
 def fundamentals_agent(state: dict[str, Any]) -> dict[str, Any]:
     llm = get_llm(state.get("llm_provider", "anthropic"), state.get("llm_model", "claude-sonnet-4-6"))
-    options_data = state.get("options_data", {})
-    insider_data = state.get("insider_data", [])
+    options_data   = state.get("options_data", {})
+    insider_data   = state.get("insider_data", [])
+    short_interest = state.get("short_interest", {})
     results: dict[str, dict] = {}
 
     for ticker, forecast in state["kronos_signals"].items():
         fundamentals = _fetch_fundamentals(ticker)
         options_ctx  = _format_options(ticker, options_data)
         insider_ctx  = _format_insider(ticker, insider_data)
-        extra = "\n".join(filter(None, [options_ctx, insider_ctx]))
+        short_ctx    = _format_short_interest(ticker, short_interest)
+        extra = "\n".join(filter(None, [options_ctx, insider_ctx, short_ctx]))
         context = render_for_llm(forecast)
         response = llm.invoke([
             SystemMessage(

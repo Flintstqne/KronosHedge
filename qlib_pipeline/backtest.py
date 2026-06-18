@@ -29,6 +29,7 @@ class VirtualPortfolio:
     trailing_stop: float = 0.07       # floor for vol-scaled stops (0 = disabled)
     spy_reserve: bool = True          # 3F: park circuit-breaker cash in SPY instead of idle
     stop_cooldown_days: int = 5       # rebalance days to block re-entry after a stop fires
+    slippage_bps: float = 5.0        # one-way fill slippage in basis points
 
     cash: float = field(init=False)
     positions: dict[str, float] = field(default_factory=dict)   # negative = short
@@ -149,12 +150,15 @@ class VirtualPortfolio:
             elif delta > min_notional:
                 buys.append((ticker, delta))
 
+        slip = self.slippage_bps / 10_000
+
         # Sells first: reduces longs OR opens/increases shorts → always frees or receives cash
         for ticker, delta in sells:
-            px = prices[ticker]
-            share_delta = delta / px                      # negative
+            px = prices[ticker] * (1 - slip)              # sell into bid
+            share_delta = delta / prices[ticker]          # shares based on mid
             self.positions[ticker] = self.positions.get(ticker, 0.0) + share_delta
-            self.cash -= delta                            # delta<0 → cash increases
+            fill_notional = abs(share_delta) * px
+            self.cash += fill_notional                    # receive slippage-reduced proceeds
             if self.positions[ticker] < 0 and ticker not in self._price_troughs:
                 self._price_troughs[ticker] = px          # init short trough
             orders.append({"ticker": ticker, "side": "sell",
@@ -162,12 +166,13 @@ class VirtualPortfolio:
 
         # Buys: increases longs OR covers shorts → costs cash
         for ticker, delta in buys:
-            if self.cash < delta:
+            px = prices[ticker] * (1 + slip)              # buy at ask
+            shares = delta / prices[ticker]               # shares based on mid
+            fill_cost = shares * px
+            if self.cash < fill_cost:
                 continue
-            px = prices[ticker]
-            share_delta = delta / px                      # positive
-            self.positions[ticker] = self.positions.get(ticker, 0.0) + share_delta
-            self.cash -= delta
+            self.positions[ticker] = self.positions.get(ticker, 0.0) + shares
+            self.cash -= fill_cost
             if self.positions[ticker] > 0 and ticker not in self._price_peaks:
                 self._price_peaks[ticker] = px            # init long peak
             orders.append({"ticker": ticker, "side": "buy",
@@ -216,6 +221,7 @@ class Backtester:
         trailing_stop: float = 0.07,
         spy_reserve: bool = True,       # 3F: park circuit-breaker cash in SPY
         stop_cooldown_days: int = 5,    # rebalance days to block re-entry after stop fires
+        slippage_bps: float = 5.0,
         # Alpha settings
         momentum_blend: float = 0.80,
         top_n: int = 10,
@@ -253,6 +259,7 @@ class Backtester:
             trailing_stop=trailing_stop,
             spy_reserve=spy_reserve,
             stop_cooldown_days=stop_cooldown_days,
+            slippage_bps=slippage_bps,
         )
 
     def run(self) -> pd.DataFrame:
