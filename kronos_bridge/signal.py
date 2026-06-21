@@ -44,6 +44,7 @@ def _derive_metrics(
 ) -> tuple[float, float, float, str, float]:
     closes = predicted["close"].values
     predicted_return = (closes[-1] - last_close) / last_close
+    predicted_return = max(-0.15, min(0.15, predicted_return))  # cap absurd predictions
 
     ranges = (predicted["high"].values - predicted["low"].values) / predicted["close"].values
     predicted_volatility = float(np.std(ranges))
@@ -279,7 +280,9 @@ class _SyKronosPredictor:
         self._pred = _KP(mdl, tok, max_context=self._MAX_CTX.get(model_size, 512))
 
     def predict(self, df: pd.DataFrame, pred_len: int) -> pd.DataFrame:
-        x_df = df[["open", "high", "low", "close"]].copy()
+        # Pass all 6 columns so the model gets real volume context instead of zeros
+        cols = ["open", "high", "low", "close", "volume", "amount"]
+        x_df = df[[c for c in cols if c in df.columns]].copy()
         x_ts = pd.Series(df.index.astype(str) if not hasattr(df.index, "strftime")
                          else df.index, name="timestamps")
         y_ts = pd.Series(
@@ -288,9 +291,14 @@ class _SyKronosPredictor:
         )
         out = self._pred.predict(
             df=x_df, x_timestamp=x_ts, y_timestamp=y_ts,
-            pred_len=pred_len, T=1.0, top_p=0.9, sample_count=1,
+            pred_len=pred_len, T=1.0, top_p=0.9, sample_count=5,
         )
         out = out.set_index(y_ts.values) if not isinstance(out.index, pd.DatetimeIndex) else out
+        # Clip decoded predictions: no large-cap moves ±30% in 5 trading days
+        last_close = float(df["close"].iloc[-1])
+        for col in ["open", "high", "low", "close"]:
+            if col in out.columns:
+                out[col] = out[col].clip(last_close * 0.70, last_close * 1.30)
         if "volume" not in out.columns:
             out["volume"] = float(df["volume"].iloc[-1])
         if "amount" not in out.columns:

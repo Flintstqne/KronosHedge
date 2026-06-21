@@ -75,7 +75,7 @@ kronos:
   horizon: 5
   device: cpu
   batch_size: 16
-  lookback_days: 60
+  lookback_days: 120
 agents:
   llm_provider: anthropic
   llm_model: claude-sonnet-4-6
