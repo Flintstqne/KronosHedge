@@ -16,7 +16,15 @@ def market_is_open() -> bool:
         return False
     open_t  = now.replace(hour=9,  minute=30, second=0, microsecond=0)
     close_t = now.replace(hour=16, minute=0,  second=0, microsecond=0)
-    return open_t <= now <= close_t
+    if not (open_t <= now <= close_t):
+        return False
+    # Catch market holidays (Juneteenth, MLK, etc.) that fall on weekdays.
+    # SPY has no intraday bars on closed days.
+    try:
+        spy = yf.download("SPY", period="1d", interval="1m", progress=False, auto_adjust=True)
+        return not spy.empty
+    except Exception:
+        return True  # assume open if the check itself fails
 
 
 def is_past_signal_time(signal_time: str = "10:00") -> bool:

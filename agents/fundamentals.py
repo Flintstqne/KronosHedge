@@ -15,6 +15,16 @@ from .llm import get_llm
 SCHEMA = '{"signal": "bullish"|"bearish"|"neutral", "confidence": <0-100>, "reasoning": "<str>"}'
 
 
+def _parse_llm_json(content: str) -> dict:
+    """Strip markdown code fences then parse JSON."""
+    text = content.strip()
+    if text.startswith("```"):
+        # drop opening fence + optional language tag
+        text = text.split("\n", 1)[-1] if "\n" in text else text[3:]
+        text = text.rsplit("```", 1)[0]
+    return json.loads(text.strip())
+
+
 def _fetch_fundamentals(ticker: str) -> str:
     try:
         info = yf.Ticker(ticker).info
@@ -84,13 +94,13 @@ def fundamentals_agent(state: dict[str, Any]) -> dict[str, Any]:
             SystemMessage(
                 content=f"You are a fundamental analyst. Evaluate {ticker} using financial "
                         f"ratios, options market signals, insider activity, and the Kronos price "
-                        f"forecast as context. Output JSON: {SCHEMA}"
+                        f"forecast as context. Output ONLY raw JSON, no markdown, no code fences: {SCHEMA}"
             ),
             HumanMessage(content=f"Fundamentals:\n{fundamentals}\n{extra}\n\n{context}"),
         ])
         try:
-            results[ticker] = json.loads(response.content)
-        except json.JSONDecodeError:
+            results[ticker] = _parse_llm_json(response.content)
+        except (json.JSONDecodeError, ValueError):
             results[ticker] = {"signal": "neutral", "confidence": 50, "reasoning": "Parse error."}
 
     return {**state, "fundamental_signals": results}
@@ -114,13 +124,14 @@ def sentiment_agent(state: dict[str, Any]) -> dict[str, Any]:
         response = llm.invoke([
             SystemMessage(
                 content=f"You are a sentiment analyst. Evaluate market sentiment for {ticker} "
-                        f"from recent news combined with the Kronos price forecast. Output JSON: {SCHEMA}"
+                        f"from recent news combined with the Kronos price forecast. "
+                        f"Output ONLY raw JSON, no markdown, no code fences: {SCHEMA}"
             ),
             HumanMessage(content=f"Recent headlines:\n{headlines}\n\n{context}"),
         ])
         try:
-            results[ticker] = json.loads(response.content)
-        except json.JSONDecodeError:
+            results[ticker] = _parse_llm_json(response.content)
+        except (json.JSONDecodeError, ValueError):
             results[ticker] = {"signal": "neutral", "confidence": 50, "reasoning": "Parse error."}
 
     return {**state, "sentiment_signals": results}

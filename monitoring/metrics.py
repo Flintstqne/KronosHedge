@@ -105,6 +105,10 @@ class PerformanceMetrics:
                 else:
                     actual_ret = None
 
+                # Skip stale pairs (market holiday — prices unchanged across runs)
+                if actual_ret == 0:
+                    continue
+
                 correct = None
                 if actual_ret is not None:
                     correct = (
@@ -193,7 +197,7 @@ class PerformanceMetrics:
                 nxt_sig  = nxt.get("kronos_signals",  {}).get(ticker, {})
                 c0 = curr_sig.get("last_close") if isinstance(curr_sig, dict) else None
                 c1 = nxt_sig.get("last_close")  if isinstance(nxt_sig,  dict) else None
-                if c0 and c1 and c0 > 0:
+                if c0 and c1 and c0 > 0 and c1 != c0:  # skip stale (holiday) pairs
                     actual_ret[ticker] = (c1 - c0) / c0
 
             for ticker, wt in weights.items():
