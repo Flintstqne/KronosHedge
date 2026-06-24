@@ -78,7 +78,7 @@ kronos:
   lookback_days: 120
 agents:
   llm_provider: groq
-  llm_model: llama-3.3-70b-versatile
+  llm_model: llama-3.1-8b-instant
   max_concurrent: 4
   enabled:
   - technicals
