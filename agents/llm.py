@@ -21,4 +21,12 @@ def get_llm(provider: str = "anthropic", model: str = "claude-sonnet-4-6"):
             api_key=os.environ["OPENAI_API_KEY"],
             temperature=0.1,
         )
+    elif provider == "groq":
+        from langchain_groq import ChatGroq
+        return ChatGroq(
+            model=model,
+            api_key=os.environ["GROQ_API_KEY"],
+            temperature=0.1,
+            max_tokens=2048,
+        )
     raise ValueError(f"Unknown provider: {provider}")

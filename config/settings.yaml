@@ -77,8 +77,8 @@ kronos:
   batch_size: 16
   lookback_days: 120
 agents:
-  llm_provider: anthropic
-  llm_model: claude-sonnet-4-6
+  llm_provider: groq
+  llm_model: llama-3.3-70b-versatile
   max_concurrent: 4
   enabled:
   - technicals
