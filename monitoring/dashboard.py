@@ -110,6 +110,10 @@ def _fetch_alpaca_live() -> dict | None:
 st.sidebar.title("Kronos Hedge")
 page = st.sidebar.radio("Page", ["Data", "Performance", "Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim", "Stress Test", "Settings"])
 log_dir = st.sidebar.text_input("Audit log directory", value="./logs/audit")
+from datetime import date as _date
+_default_since = _date(2026, 6, 20)
+perf_since = st.sidebar.date_input("Performance since", value=_default_since,
+                                    help="Filter audit-log metrics and equity chart to this start date")
 st.sidebar.button("Refresh")
 
 # Live account panel
@@ -164,7 +168,8 @@ if st.sidebar.button("Clear Demo Data", help="Deletes seeded demo logs so real d
     st.rerun()
 
 logger = AuditLogger(log_dir=log_dir)
-records = logger.load_all()
+_all_records = logger.load_all()
+records = [r for r in _all_records if r.get("timestamp", "")[:10] >= perf_since.isoformat()]
 
 if not records:
     if page not in ("Backtest", "News", "Portfolio", "Trade Log", "Regime & Risk", "Forward Sim", "Stress Test"):
@@ -536,6 +541,8 @@ elif page == "Performance":
                 index=pd.to_datetime(_h["timestamps"], unit="s"),
             ).dropna()
             _s = _s[_s > 0]
+            # Apply the "performance since" filter
+            _s = _s[_s.index.date >= perf_since]
             if len(_s) >= 1:
                 _alp_eq = _s
 
