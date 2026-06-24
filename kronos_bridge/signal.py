@@ -291,7 +291,7 @@ class _SyKronosPredictor:
         )
         out = self._pred.predict(
             df=x_df, x_timestamp=x_ts, y_timestamp=y_ts,
-            pred_len=pred_len, T=1.0, top_p=0.9, sample_count=5,
+            pred_len=pred_len, T=1.0, top_p=0.9, sample_count=1,
         )
         out = out.set_index(y_ts.values) if not isinstance(out.index, pd.DatetimeIndex) else out
         # Clip decoded predictions: no large-cap moves ±30% in 5 trading days
